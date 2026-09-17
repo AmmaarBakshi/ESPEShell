@@ -125,7 +125,6 @@ static int cmd_data(int argc, char **argv, ShellIO &io) {
   io.out.print(F(" / ")); io.out.println(humanBytes(ESP.getHeapSize()));
   io.out.print(F("min heap    : ")); io.out.println(humanBytes(ESP.getMinFreeHeap()));
   io.out.print(F("cpu freq    : ")); io.out.print(ESP.getCpuFreqMHz()); io.out.println(F(" MHz"));
-  io.out.print(F("temperature : ")); io.out.print(temperatureRead(), 1); io.out.println(F(" C (internal)"));
   io.out.print(F("wifi        : "));
   if (WiFi.status() == WL_CONNECTED) {
     io.out.print(WiFi.SSID()); io.out.print(F("  ip=")); io.out.print(WiFi.localIP());
