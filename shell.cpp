@@ -523,5 +523,6 @@ const CmdTable CMD_TABLES[] = {
   {SYS_CMDS, SYS_CMDS_N},
   {NET_CMDS, NET_CMDS_N},
   {MISC_CMDS, MISC_CMDS_N},
+  {ESP_CMDS, ESP_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);
