@@ -518,5 +518,6 @@ const size_t CORE_CMDS_N = sizeof(CORE_CMDS) / sizeof(CORE_CMDS[0]);
 const CmdTable CMD_TABLES[] = {
   {CORE_CMDS, CORE_CMDS_N},
   {FS_CMDS, FS_CMDS_N},
+  {TEXT_CMDS, TEXT_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);
