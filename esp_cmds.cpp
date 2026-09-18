@@ -3,6 +3,9 @@
 #include <WiFi.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#if __has_include("esp_arduino_version.h")
+#include "esp_arduino_version.h"
+#endif
 
 // ============================================================================
 //  ESP32-specific commands: tsw, pin, restart, data, chip, heap
@@ -108,6 +111,90 @@ static int cmd_pin(int argc, char **argv, ShellIO &io) {
   return 1;
 }
 
+// ---- pwm --------------------------------------------------------------
+// The ESP32 Arduino core's LEDC API changed between core 2.x (explicit
+// channel: ledcSetup+ledcAttachPin+ledcWrite(channel)) and core 3.x
+// (pin-based: ledcAttach+ledcWrite(pin)). Detect via the core version so
+// this builds either way.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+#define ESPE_LEDC_NEW_API 1
+#else
+#define ESPE_LEDC_NEW_API 0
+#endif
+
+static bool     g_pwmSet[40];
+static uint32_t g_pwmFreq[40];
+#if !ESPE_LEDC_NEW_API
+static int8_t g_pwmChan[40];
+static int8_t g_pwmNextChan = 0;
+#endif
+
+static int cmd_pwm(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    io.out.println(F("usage: pwm <pin> <duty 0-255> [freqHz] | pwm <pin> off | pwm --status"));
+    return 1;
+  }
+  String a1 = argv[1];
+  if (a1 == "--status" || a1 == "-s") {
+    io.out.println(F("PWM-configured pins:"));
+    bool any = false;
+    for (int p = 0; p <= 39; ++p)
+      if (g_pwmSet[p]) { io.out.printf("  GPIO%-2d  freq=%luHz  res=8bit\n", p, (unsigned long)g_pwmFreq[p]); any = true; }
+    if (!any) io.out.println(F("  (none yet)"));
+    return 0;
+  }
+
+  int p = a1.toInt();
+  if (!usablePin(p) || inputOnly(p)) { io.out.printf("pwm: GPIO%d cannot output\n", p); return 1; }
+
+  if (argc >= 3 && String(argv[2]) == "off") {
+    if (g_pwmSet[p]) {
+#if ESPE_LEDC_NEW_API
+      ledcDetach(p);
+#else
+      ledcDetachPin(p);
+#endif
+      g_pwmSet[p] = false;
+    }
+    io.out.printf("GPIO%d: PWM off\n", p);
+    return 0;
+  }
+
+  if (argc < 3) { io.out.println(F("usage: pwm <pin> <duty 0-255> [freqHz]")); return 1; }
+  int duty = atoi(argv[2]);
+  if (duty < 0) duty = 0;
+  if (duty > 255) duty = 255;
+  uint32_t freq = (argc >= 4) ? (uint32_t)atol(argv[3]) : 5000;
+
+  if (!g_pwmSet[p]) {
+#if ESPE_LEDC_NEW_API
+    if (!ledcAttach(p, freq, 8)) { io.out.printf("pwm: failed to attach GPIO%d\n", p); return 1; }
+#else
+    if (g_pwmNextChan > 15) { io.out.println(F("pwm: all 16 LEDC channels are in use")); return 1; }
+    int ch = g_pwmNextChan++;
+    ledcSetup(ch, freq, 8);
+    ledcAttachPin(p, ch);
+    g_pwmChan[p] = ch;
+#endif
+    g_pwmSet[p] = true;
+  } else if (argc >= 4) {
+#if ESPE_LEDC_NEW_API
+    ledcChangeFrequency(p, freq, 8);
+#else
+    ledcSetup(g_pwmChan[p], freq, 8);
+#endif
+  }
+  g_pwmFreq[p] = freq;
+
+#if ESPE_LEDC_NEW_API
+  ledcWrite(p, duty);
+#else
+  ledcWrite(g_pwmChan[p], duty);
+#endif
+  io.out.printf("GPIO%d: PWM duty=%d/255 freq=%luHz\n", p, duty, (unsigned long)freq);
+  return 0;
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -160,6 +247,7 @@ static int cmd_heap(int argc, char **argv, ShellIO &io) {
 const Command ESP_CMDS[] = {
   {"tsw",     cmd_tsw,     "tsw",                "time since wake (uptime)",            G_ESP},
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
+  {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
   {"reboot",  cmd_restart, "reboot",             "reboot the ESP32",                    G_ESP},
   {"data",    cmd_data,    "data",               "live runtime data snapshot",          G_ESP},
