@@ -325,6 +325,60 @@ static int cmd_ota(int argc, char **argv, ShellIO &io) {
   return 0;  // not reached
 }
 
+// ---- sleep / deepsleep : power management -----------------------------
+#include "esp_sleep.h"
+
+// GPIOs that can wake the classic ESP32 from deep sleep (RTC IO domain).
+static bool rtcGpio(int p) {
+  switch (p) {
+    case 0: case 2: case 4: case 12: case 13: case 14: case 15:
+    case 25: case 26: case 27: case 32: case 33: case 34: case 35:
+    case 36: case 37: case 38: case 39:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static int cmd_sleep(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: sleep <seconds>   (light sleep - RAM kept, WiFi/telnet likely drops)")); return 1; }
+  double secs = atof(argv[1]);
+  if (secs <= 0) { io.out.println(F("sleep: seconds must be > 0")); return 1; }
+  io.out.printf("light sleep for %.1fs (the current connection may drop)...\n", secs);
+  io.out.flush();
+  esp_sleep_enable_timer_wakeup((uint64_t)(secs * 1000000ULL));
+  esp_light_sleep_start();
+  io.out.println(F("awake."));
+  return 0;
+}
+
+static int cmd_deepsleep(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    io.out.println(F("usage: deepsleep <seconds> [pin<N> <0|1>]"));
+    io.out.println(F("       0 seconds = timer disabled, wake by pin only."));
+    io.out.println(F("       deep sleep resets the chip on wake - setup() runs again."));
+    return 1;
+  }
+  double secs = atof(argv[1]);
+  if (secs < 0) { io.out.println(F("deepsleep: seconds must be >= 0")); return 1; }
+  if (secs > 0) esp_sleep_enable_timer_wakeup((uint64_t)(secs * 1000000ULL));
+
+  if (argc >= 4 && String(argv[2]).startsWith("pin")) {
+    int pin = String(argv[2]).substring(3).toInt();
+    int level = atoi(argv[3]) ? 1 : 0;
+    if (!rtcGpio(pin)) { io.out.printf("deepsleep: GPIO%d cannot wake from deep sleep\n", pin); return 1; }
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)pin, level);
+    io.out.printf("deep sleep: wake on timer (%.1fs) or GPIO%d == %d ...\n", secs, pin, level);
+  } else {
+    io.out.printf("deep sleep for %.1fs...\n", secs);
+  }
+  io.out.println(F("rebooting into setup() on wake."));
+  io.out.flush();
+  delay(200);
+  esp_deep_sleep_start();
+  return 0;  // not reached
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -380,6 +434,8 @@ const Command ESP_CMDS[] = {
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
   {"led",     cmd_led,     "led on|off|toggle|status", "onboard LED (DevKit V1: GPIO2)",G_ESP},
   {"ota",     cmd_ota,     "ota <url>",                 "download+flash firmware over HTTP(S)", G_ESP},
+  {"sleep",     cmd_sleep,     "sleep <secs>",            "light sleep (RAM kept)",        G_ESP},
+  {"deepsleep", cmd_deepsleep, "deepsleep <secs> [pinN v]","deep sleep (resets on wake)",  G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
   {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
