@@ -4,6 +4,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <Wire.h>
+#include <Update.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #if __has_include("esp_arduino_version.h")
 #include "esp_arduino_version.h"
 #endif
@@ -267,6 +270,61 @@ static int cmd_led(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- ota : download a .bin over HTTP(S) and flash it -----------------------
+static int cmd_ota(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: ota <url-to-firmware.bin>")); return 1; }
+  if (WiFi.status() != WL_CONNECTED) { io.out.println(F("ota: WiFi not connected")); return 1; }
+  String url = argv[1];
+
+  HTTPClient http;
+  WiFiClientSecure *sc = nullptr;
+  WiFiClient plain;
+  bool began;
+  if (url.startsWith("https")) {
+    sc = new WiFiClientSecure();
+    sc->setInsecure();
+    began = http.begin(*sc, url);
+  } else {
+    began = http.begin(plain, url);
+  }
+  if (!began) { io.out.println(F("ota: could not open URL")); delete sc; return 1; }
+
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    io.out.printf("ota: HTTP %d\n", code);
+    http.end(); delete sc; return 1;
+  }
+  int len = http.getSize();
+  if (len <= 0) {
+    io.out.println(F("ota: server did not report a content length (Content-Length required)"));
+    http.end(); delete sc; return 1;
+  }
+  io.out.printf("ota: downloading %d bytes and flashing...\n", len);
+
+  if (!Update.begin(len)) {
+    io.out.print(F("ota: not enough space: "));
+    io.out.println(Update.errorString());
+    http.end(); delete sc; return 1;
+  }
+
+  WiFiClient *stream = http.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  bool ok = (written == (size_t)len) && Update.end(true);
+  http.end();
+  delete sc;
+
+  if (!ok) {
+    io.out.printf("ota: failed (%u/%d bytes written): ", (unsigned)written, len);
+    io.out.println(Update.errorString());
+    return 1;
+  }
+  io.out.println(F("ota: flashed OK. Rebooting..."));
+  io.out.flush();
+  delay(300);
+  ESP.restart();
+  return 0;  // not reached
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -321,6 +379,7 @@ const Command ESP_CMDS[] = {
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
   {"led",     cmd_led,     "led on|off|toggle|status", "onboard LED (DevKit V1: GPIO2)",G_ESP},
+  {"ota",     cmd_ota,     "ota <url>",                 "download+flash firmware over HTTP(S)", G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
   {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
