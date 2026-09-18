@@ -63,6 +63,7 @@ extern const Command NET_CMDS[];     extern const size_t NET_CMDS_N;
 extern const Command MISC_CMDS[];    extern const size_t MISC_CMDS_N;
 extern const Command ESP_CMDS[];     extern const size_t ESP_CMDS_N;
 extern const Command XFER_CMDS[];    extern const size_t XFER_CMDS_N;
+extern const Command MQTT_CMDS[];    extern const size_t MQTT_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -122,6 +123,11 @@ void wifiLoadAndConnect(Print &out);   // reads NVS-saved creds, else config.h; 
 // Increments once per boot (cached after the first call); call once from
 // setup() so the count is correct even if `dmesg` is never run.
 uint32_t espeBootCount();
+
+// ---- MQTT (mqtt_cmds.cpp) - optional, needs the PubSubClient library -------
+void   mqttPoll();          // call once per main loop() iteration
+bool   mqttHasPending();    // true if a subscribed message is waiting to be shown
+String mqttPopPending();    // pops the oldest pending message, formatted "topic: payload"
 
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);

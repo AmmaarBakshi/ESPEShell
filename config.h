@@ -37,5 +37,13 @@
 // being recompiled in, e.g. WiFi credentials set at runtime with `wifi set`.
 #define ESPE_PREFS_NAMESPACE "espeshell"
 
+// ---- MQTT (optional - requires the "PubSubClient" library by knolleary) ----
+// Install via Arduino Library Manager: search "PubSubClient" (Nick O'Leary).
+// This is the ONE dependency in this project not bundled with the ESP32 core.
+// Leave MQTT_BROKER_HOST empty to require `mqtt connect <host> [port]` each
+// time instead of a compiled-in default.
+#define MQTT_BROKER_HOST  ""
+#define MQTT_BROKER_PORT  1883
+
 // ---- Version ---------------------------------------------------------------
 #define ESPE_VERSION    "0.2.0"

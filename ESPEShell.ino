@@ -298,8 +298,32 @@ void setup() {
   printPrompt(cp);
 }
 
+// Drains any MQTT messages queued since the last iteration into Serial and
+// (if in shell mode) the live Telnet session, then redraws each one's
+// in-progress prompt/line - like a real async subscriber, without disturbing
+// what's being typed. See mqtt_cmds.cpp.
+static void drainMqtt() {
+  mqttPoll();
+  while (mqttHasPending()) {
+    String msg = mqttPopPending();
+
+    CountingPrint scp(Serial);
+    scp.println();
+    scp.print(F("[mqtt] ")); scp.println(msg);
+    redrawLine(scp, serSt.line);
+
+    if (telnetClient && telnetClient.connected() && tnState == T_SHELL) {
+      CountingPrint tcp(telnetClient);
+      tcp.println();
+      tcp.print(F("[mqtt] ")); tcp.println(msg);
+      redrawLine(tcp, tnSt.line);
+    }
+  }
+}
+
 void loop() {
   handleTelnet();
   handleSerial();
+  drainMqtt();
   delay(1);
 }
