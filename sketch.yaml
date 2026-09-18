@@ -1,0 +1,10 @@
+# arduino-cli project file: pins the exact board profile for an ESP32 DevKit V1
+# (ESP32-WROOM-32 module, board menu entry "ESP32 Dev Module"), so
+# `arduino-cli compile .` / `arduino-cli upload -p <PORT> .` need no --fqbn flag.
+#
+# Options match DevKit V1's typical 4MB flash, no PSRAM:
+#   PartitionScheme=default   -> includes OTA (ota_0/ota_1) + nvs + a data partition
+#   FlashMode=qio, FlashFreq=80, FlashSize=4M
+#   UploadSpeed=921600        -> standard for the CP2102/CH340 USB-UART on this board
+# Arduino IDE users: see README.md for the equivalent Tools-menu settings.
+default_fqbn: esp32:esp32:esp32:PartitionScheme=default,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none
