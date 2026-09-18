@@ -6,7 +6,7 @@ reach an ESP32 (full SSH crypto does not fit comfortably on the chip).
 
 It implements ~100 common shell commands (filesystem, text processing, search,
 system/info, networking) on top of **LittleFS**, plus ESP-specific commands like
-`tsw`, `pin`, `pwm`, `restart` and `data`. Pipes (`|`) and redirection (`>`, `>>`)
+`tsw`, `pin`, `pwm`, `restart` and `data`. Pipes (`|`) and redirection (`<`, `>`, `>>`)
 work, and so does command history (Up/Down) and Tab completion. WiFi credentials
 can be set at runtime (no reflash needed) and firmware can be updated over the
 air.

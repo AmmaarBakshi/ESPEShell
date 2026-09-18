@@ -285,7 +285,15 @@ static int cmd_stat(int argc, char **argv, ShellIO &io) {
     io.out.print(F("   Type: ")); io.out.println(dir ? F("directory") : F("regular file"));
     if (!dir) {
       File f = LittleFS.open(abs, "r");
-      if (f) { time_t t = f.getLastWrite(); if (t > 0) { io.out.print(F("  Mtime: ")); io.out.println((long)t); } f.close(); }
+      // Without NTP/an RTC the stored timestamp is just seconds since boot-
+      // epoch, which is meaningless - only show a real wall-clock time.
+      if (f) {
+        time_t t = f.getLastWrite();
+        io.out.print(F("  Mtime: "));
+        if (t > 1000000000L) io.out.println((long)t);
+        else io.out.println(F("(clock not set)"));
+        f.close();
+      }
     }
   }
   return rc;

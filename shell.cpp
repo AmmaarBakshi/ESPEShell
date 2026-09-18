@@ -394,6 +394,38 @@ static bool parseRedirect(std::vector<String> &args, String &redir, bool &append
   return false;
 }
 
+// Pull a '<' input redirection out of the arg list. Returns true if found.
+static bool parseInRedirect(std::vector<String> &args, String &inFile) {
+  inFile = "";
+  for (size_t i = 0; i < args.size(); ++i) {
+    String &t = args[i];
+    if (t == "<") {
+      if (i + 1 < args.size()) {
+        inFile = args[i + 1];
+        args.erase(args.begin() + i, args.begin() + i + 2);
+      } else {
+        args.erase(args.begin() + i);
+      }
+      return true;
+    } else if (t.startsWith("<")) {
+      inFile = t.substring(1);
+      args.erase(args.begin() + i);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Commands write terminal line endings (\r\n, which Telnet/serial terminals
+// need). Files should hold plain \n, so strip the CR on the way to disk.
+String toUnixEol(const String &s) {
+  String o;
+  o.reserve(s.length());
+  for (size_t i = 0; i < s.length(); ++i)
+    if (s[i] != '\r') o += s[i];
+  return o;
+}
+
 // ============================================================================
 //  Dispatch: pipes + redirection
 // ============================================================================
@@ -418,6 +450,30 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
     bool append = false;
     bool hasRedir = false;
     if (last) hasRedir = parseRedirect(args, redir, append);
+
+    // '<' feeds a file in as the first stage's stdin.
+    if (s == 0) {
+      String inFile;
+      if (parseInRedirect(args, inFile)) {
+        String abs = resolvePath(inFile);
+        File f = LittleFS.open(abs, "r");
+        if (!f || f.isDirectory()) {
+          realOut.print(inFile);
+          realOut.println(": cannot read");
+          if (f) f.close();
+          return 1;
+        }
+        stageIn = "";
+        uint8_t buf[128];
+        while (true) {
+          int n = f.read(buf, sizeof(buf));
+          if (n <= 0) break;
+          for (int k = 0; k < n; ++k) stageIn += (char)buf[k];
+        }
+        f.close();
+        haveIn = true;
+      }
+    }
 
     if (args.empty()) {
       if (last) return rc;
@@ -453,7 +509,7 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
           realOut.println(": cannot open for writing");
           return 1;
         }
-        f.print(sbuf.s);
+        f.print(toUnixEol(sbuf.s));
         f.close();
       }
     } else {
@@ -531,7 +587,7 @@ static int cmd_help(int argc, char **argv, ShellIO &io) {
   io.out.println(F("ESPEShell - available commands (help <cmd> for usage):"));
   helpList(io, -1);
   io.out.println();
-  io.out.println(F("Pipes '|' and redirection '>' '>>' are supported."));
+  io.out.println(F("Pipes '|' and redirection '<' '>' '>>' are supported."));
   return 0;
 }
 

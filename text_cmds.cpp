@@ -189,14 +189,31 @@ static int cmd_cut(int argc, char **argv, ShellIO &io) {
 }
 
 // ---- tr --------------------------------------------------------------------
+// Expands "a-z" style ranges into the literal characters they cover.
+static String expandSet(const String &s) {
+  String o;
+  for (size_t i = 0; i < s.length(); ++i) {
+    if (i + 2 < s.length() && s[i + 1] == '-' && s[i + 2] >= s[i]) {
+      for (char c = s[i]; c <= s[i + 2]; ++c) o += c;
+      i += 2;
+    } else {
+      o += s[i];
+    }
+  }
+  return o;
+}
+
 static int cmd_tr(int argc, char **argv, ShellIO &io) {
   bool del = hasOpt(argc, argv, 'd');
   std::vector<String> ops;
   for (int i = 1; i < argc; ++i) if (!(argv[i][0] == '-' && argv[i][1] != 0)) ops.push_back(argv[i]);
-  if (io.hasIn() == false && ops.empty()) return 0;
-  String set1 = ops.size() > 0 ? ops[0] : "";
-  String set2 = ops.size() > 1 ? ops[1] : "";
-  String data; if (!io.hasIn()) return 0; data = *io.in;   // tr reads only stdin
+  String set1 = expandSet(ops.size() > 0 ? ops[0] : String(""));
+  String set2 = expandSet(ops.size() > 1 ? ops[1] : String(""));
+  if (!io.hasIn()) {                       // tr reads only stdin
+    io.out.println(F("tr: no input (use a pipe, or '< file')"));
+    return 1;
+  }
+  String data = *io.in;
   String out;
   for (size_t i = 0; i < data.length(); ++i) {
     char c = data[i];
@@ -219,7 +236,7 @@ static int cmd_tee(int argc, char **argv, ShellIO &io) {
     if (argv[i][0] == '-' && argv[i][1] != 0) continue;
     String ap = resolvePath(argv[i]);
     File f = LittleFS.open(ap, append ? "a" : "w");
-    if (f) { f.print(data); f.close(); }
+    if (f) { f.print(toUnixEol(data)); f.close(); }
     else { io.out.print(argv[i]); io.out.println(F(": cannot open")); }
   }
   io.out.print(data);
