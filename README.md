@@ -254,7 +254,7 @@ Highlights:
 - **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep`
 - **Networking:** `ip wifi mqtt ping curl wget dig nslookup ss`
 - **File transfer:** `send recv`
-- **ESP32:** `tsw pin pwm led sleep deepsleep restart ota dmesg data chip heap
+- **ESP32:** `tsw pin pwm led blink sleep deepsleep restart ota dmesg data chip heap
   i2cscan wifiscan`
 
 ### ESP-specific
@@ -268,6 +268,7 @@ Highlights:
 | `pin write <n> <0\|1>`         | drive a pin high/low                                     |
 | `pwm <n> <duty> [freq]` / `off` / `--status` | PWM output on a pin (LEDC), duty 0-255      |
 | `led on\|off\|toggle\|status`  | onboard LED, DevKit V1 default GPIO2                     |
+| `blink [-secs] [-per-sec]`     | flash the onboard LED; default 10s at 1/sec, Ctrl-C stops |
 | `i2cscan [-sda P] [-scl P]`    | probe the I2C bus, print addresses that answer           |
 | `wifiscan`                     | list nearby WiFi networks (RSSI, channel, security)      |
 | `sleep <secs>`                 | light sleep (RAM kept; WiFi/Telnet likely drops)         |

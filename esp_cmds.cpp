@@ -289,6 +289,71 @@ static int cmd_led(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- blink : flash the onboard LED for a while -----------------------------
+// Sleeps `ms`, returning true if Ctrl-C arrived on the live connection so a
+// long blink doesn't hold the shell hostage.
+static bool blinkWait(ShellIO &io, int ms) {
+  unsigned long start = millis();
+  while (millis() - start < (unsigned long)ms) {
+    if (io.rawIn && io.rawIn->available()) {
+      int c = io.rawIn->read();
+      g_bytesIn++;
+      if (c == 0x03) return true;   // Ctrl-C
+    }
+    delay(2);
+  }
+  return false;
+}
+
+static int cmd_blink(int argc, char **argv, ShellIO &io) {
+  int secs = 10;   // default: blink for 10 seconds
+  int rate = 1;    // default: 1 blink per second
+  int seen = 0;
+  for (int i = 1; i < argc; ++i) {
+    String a = argv[i];
+    if (a.length() > 1 && a[0] == '-' && isdigit((int)a[1])) {
+      long v = a.substring(1).toInt();
+      if (seen == 0) secs = (int)v;
+      else if (seen == 1) rate = (int)v;
+      seen++;
+    } else {
+      io.out.println(F("usage: blink [-seconds] [-blinks-per-second]"));
+      io.out.println(F("       blink        -> 10s at 1/sec"));
+      io.out.println(F("       blink -20    -> 20s at 1/sec"));
+      io.out.println(F("       blink -20 -2 -> 20s at 2/sec"));
+      return 1;
+    }
+  }
+  if (secs <= 0) { io.out.println(F("blink: seconds must be > 0")); return 1; }
+  if (rate <= 0) { io.out.println(F("blink: blinks per second must be > 0")); return 1; }
+  if (rate > 50) rate = 50;   // faster than this just looks like a solid LED
+
+  const int pin = ESPE_ONBOARD_LED_PIN;
+  pinMode(pin, OUTPUT);
+  g_ledInit = true;
+  g_pinSet[pin] = true;
+  g_pinMode[pin] = 1;
+
+  int halfMs = 500 / rate;             // on for half a period, off for half
+  long blinks = (long)secs * rate;
+  io.out.printf("blinking GPIO%d for %ds at %d/sec (%ld blinks) - Ctrl-C to stop\n",
+                pin, secs, rate, blinks);
+
+  unsigned long start = millis();
+  unsigned long durMs = (unsigned long)secs * 1000UL;
+  bool aborted = false;
+  while (millis() - start < durMs) {
+    digitalWrite(pin, HIGH);
+    if (blinkWait(io, halfMs)) { aborted = true; break; }
+    digitalWrite(pin, LOW);
+    if (blinkWait(io, halfMs)) { aborted = true; break; }
+  }
+  digitalWrite(pin, LOW);
+  g_ledOn = false;
+  io.out.println(aborted ? F("blink: stopped.") : F("blink: done."));
+  return 0;
+}
+
 // ---- ota : download a .bin over HTTP(S) and flash it -----------------------
 static int cmd_ota(int argc, char **argv, ShellIO &io) {
   if (argc < 2) { io.out.println(F("usage: ota <url-to-firmware.bin>")); return 1; }
@@ -511,6 +576,7 @@ const Command ESP_CMDS[] = {
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
   {"led",     cmd_led,     "led on|off|toggle|status", "onboard LED (DevKit V1: GPIO2)",G_ESP},
+  {"blink",   cmd_blink,   "blink [-secs] [-per-sec]",  "flash the onboard LED",        G_ESP},
   {"ota",     cmd_ota,     "ota <url>",                 "download+flash firmware over HTTP(S)", G_ESP},
   {"sleep",     cmd_sleep,     "sleep <secs>",            "light sleep (RAM kept)",        G_ESP},
   {"deepsleep", cmd_deepsleep, "deepsleep <secs> [pinN v]","deep sleep (resets on wake)",  G_ESP},
