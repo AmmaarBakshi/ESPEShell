@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <LittleFS.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "shell.h"
 
@@ -205,6 +206,14 @@ void setup() {
   }
 
   wifiLoadAndConnect(Serial);
+  if (WiFi.status() == WL_CONNECTED) {
+    if (MDNS.begin(g_hostname.c_str())) {
+      MDNS.addService("telnet", "tcp", TELNET_PORT);
+      Serial.printf("[mdns] connect with  telnet %s.local %d\n", g_hostname.c_str(), TELNET_PORT);
+    } else {
+      Serial.println(F("[mdns] failed to start (telnet still works via the printed IP)"));
+    }
+  }
   telnetServer.begin();
   telnetServer.setNoDelay(true);
 
