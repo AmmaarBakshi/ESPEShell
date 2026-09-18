@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <Wire.h>
 #if __has_include("esp_arduino_version.h")
 #include "esp_arduino_version.h"
 #endif
@@ -195,6 +196,32 @@ static int cmd_pwm(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- i2cscan ------------------------------------------------------------
+static int cmd_i2cscan(int argc, char **argv, ShellIO &io) {
+  int sda = -1, scl = -1;
+  for (int i = 1; i < argc; ++i) {
+    String a = argv[i];
+    if (a == "-sda" && i + 1 < argc) sda = atoi(argv[++i]);
+    else if (a == "-scl" && i + 1 < argc) scl = atoi(argv[++i]);
+  }
+  if (sda >= 0 && scl >= 0) Wire.begin(sda, scl);
+  else Wire.begin();  // board-default SDA/SCL pins
+
+  io.out.print(F("Scanning I2C bus"));
+  if (sda >= 0 && scl >= 0) io.out.printf(" (SDA=%d SCL=%d)", sda, scl);
+  io.out.println(F(" ..."));
+
+  int found = 0;
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    uint8_t err = Wire.endTransmission();
+    if (err == 0) { io.out.printf("  found device at 0x%02X\n", addr); found++; }
+  }
+  if (!found) io.out.println(F("  no devices found"));
+  else io.out.printf("%d device(s) found\n", found);
+  return found ? 0 : 1;
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -248,6 +275,7 @@ const Command ESP_CMDS[] = {
   {"tsw",     cmd_tsw,     "tsw",                "time since wake (uptime)",            G_ESP},
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
+  {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
   {"reboot",  cmd_restart, "reboot",             "reboot the ESP32",                    G_ESP},
   {"data",    cmd_data,    "data",               "live runtime data snapshot",          G_ESP},
