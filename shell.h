@@ -23,6 +23,18 @@ struct ShellIO {
 
 typedef int (*CmdFn)(int argc, char **argv, ShellIO &io);
 
+// Per-session interactive line-editor state (used by the session layer in
+// ESPEShell.ino). It lives here rather than in the .ino because Arduino
+// auto-generates function prototypes above the sketch's own definitions, so a
+// type used in a function signature there must come from an #include.
+struct LineEditState {
+  String line;
+  bool lastCR = false;
+  uint8_t escState = 0;   // 0 = normal, 1 = saw ESC, 2 = saw ESC [
+  int histBrowse = -1;    // -1 = not browsing history; else 0 = most recent
+  String savedLine;       // what was typed before Up was first pressed
+};
+
 // Command groups (used to bucket the `help` output).
 enum {
   G_FS = 0,

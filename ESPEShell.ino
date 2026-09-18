@@ -57,14 +57,8 @@ static int feedAuthChar(uint8_t c, String &line, Print &out, bool &lastCR) {
   return 0;
 }
 
-// Per-session state for the rich shell-mode line editor.
-struct LineEditState {
-  String line;
-  bool lastCR = false;
-  uint8_t escState = 0;   // 0 = normal, 1 = saw ESC, 2 = saw ESC [
-  int histBrowse = -1;    // -1 = not browsing history; else 0 = most recent
-  String savedLine;       // what was typed before Up was first pressed
-};
+// Per-session state for the rich shell-mode line editor (LineEditState is
+// declared in shell.h - see the note there about Arduino auto-prototypes).
 static LineEditState serSt;
 static LineEditState tnSt;
 
