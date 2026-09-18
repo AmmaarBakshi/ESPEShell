@@ -12,3 +12,7 @@ build/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local notes / spec - kept out of the repo deliberately
+CLAUDE.md
+.claude/
