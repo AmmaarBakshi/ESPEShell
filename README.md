@@ -36,17 +36,52 @@ the next reboot).
 
 ## 3. Flash
 
-**Arduino IDE:** open this folder (it contains `ESPEShell.ino`), pick your ESP32
-board and port, then Upload.
+This project is configured for an **ESP32 DevKit V1** (the classic 30/38-pin
+board built around the ESP32-WROOM-32 module, no PSRAM).
 
-**arduino-cli:**
+**Arduino IDE:** open this folder (it contains `ESPEShell.ino`), then under
+**Tools** set:
+
+| Setting          | Value                          |
+| ----------------- | ------------------------------- |
+| Board              | **ESP32 Dev Module**            |
+| Upload Speed       | 921600                          |
+| Flash Frequency    | 80MHz                           |
+| Flash Mode         | QIO                              |
+| Flash Size         | 4MB (32Mb)                      |
+| Partition Scheme   | Default 4MB with spiffs         |
+| PSRAM              | Disabled                         |
+| Core Debug Level   | None                             |
+
+Pick your board's serial **Port**, then Upload.
+
+**arduino-cli:** the same settings are pinned in `sketch.yaml`, so just:
 ```sh
-arduino-cli compile --fqbn esp32:esp32:esp32 .
-arduino-cli upload  --fqbn esp32:esp32:esp32 -p <PORT> .
+arduino-cli compile .
+arduino-cli upload -p <PORT> .
 ```
-(Replace the FQBN with your board's, e.g. `esp32:esp32:esp32s3`.)
+
+The "Default 4MB with spiffs" partition scheme includes NVS (for `wifi set`
+and `dmesg`'s boot counter) and two OTA app slots (for the `ota` command), so
+no partition changes are needed for anything in this project.
 
 LittleFS is formatted automatically on first boot.
+
+### DevKit V1 pin quick-reference
+
+| Pins            | Notes                                                      |
+| ---------------- | ------------------------------------------------------------ |
+| GPIO 6-11         | Wired to the onboard SPI flash - never use these (`pin`/`pwm` refuse them) |
+| GPIO 34-39        | Input-only (no `pinMode(OUTPUT)`, no PWM)                    |
+| GPIO 0, 2, 5, 12, 15 | Strapping pins - affect boot mode; avoid driving them at boot |
+| GPIO 0            | Also the **BOOT** button (`ESPE_BOOT_BUTTON_PIN` in `config.h`) |
+| GPIO 2            | Onboard LED on most boards (`led on\|off\|toggle`)          |
+| GPIO 21 / 22      | Default I2C SDA / SCL (used by `i2cscan` when no `-sda/-scl` given) |
+| GPIO 0, 2, 4, 12-15, 25-27, 32-33 | Shared with ADC2 - readings can be unreliable while WiFi is active |
+
+Some DevKit V1 clones wire the onboard LED to a different pin (or omit it) and
+some drive it active-low - if `led on` doesn't light it, check your board's
+schematic and adjust `ESPE_ONBOARD_LED_PIN` in `config.h`.
 
 ## 4. Connect
 
@@ -85,7 +120,7 @@ Highlights:
 - **Search / scripting:** `grep rg find locate sed awk xargs which type command`
 - **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep`
 - **Networking:** `ip ping curl wget dig nslookup ss`
-- **ESP32:** `tsw pin pwm restart data chip heap i2cscan wifiscan`
+- **ESP32:** `tsw pin pwm led restart data chip heap i2cscan wifiscan`
 
 ### ESP-specific
 
@@ -104,6 +139,7 @@ Highlights:
 | `wifiscan`                   | list nearby WiFi networks (RSSI, channel, security)      |
 | `data`                       | live snapshot: heap, RSSI, uptime, bytes in/out, tasks   |
 | `restart` / `reboot`         | reboot the ESP32                                         |
+| `led on\|off\|toggle\|status`| onboard LED, DevKit V1 default GPIO2                     |
 | `chip` / `heap`              | chip info / heap summary                                 |
 
 ## 6. Honest limitations
