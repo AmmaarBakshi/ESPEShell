@@ -100,6 +100,11 @@ String expandVars(const String &s);
 bool wifiConnect(const String &ssid, const String &pass, unsigned long timeoutMs, Print &out);
 void wifiLoadAndConnect(Print &out);   // reads NVS-saved creds, else config.h; called once from setup()
 
+// ---- Boot counter (esp_cmds.cpp) - persisted in NVS, used by `dmesg` -------
+// Increments once per boot (cached after the first call); call once from
+// setup() so the count is correct even if `dmesg` is never run.
+uint32_t espeBootCount();
+
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);
 int  runLine(const String &line, Print &realOut);   // pipes + redirection

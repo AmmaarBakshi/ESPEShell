@@ -7,6 +7,8 @@
 #include <Update.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>
+#include "esp_system.h"
 #if __has_include("esp_arduino_version.h")
 #include "esp_arduino_version.h"
 #endif
@@ -379,6 +381,65 @@ static int cmd_deepsleep(int argc, char **argv, ShellIO &io) {
   return 0;  // not reached
 }
 
+// ---- dmesg : reset reason, sleep-wake cause, persisted boot count ---------
+static uint32_t g_bootCount = 0;
+static bool g_bootCountLoaded = false;
+
+uint32_t espeBootCount() {
+  if (!g_bootCountLoaded) {
+    Preferences prefs;
+    uint32_t n = 0;
+    if (prefs.begin(ESPE_PREFS_NAMESPACE, false)) {
+      n = prefs.getUInt("bootcnt", 0) + 1;
+      prefs.putUInt("bootcnt", n);
+      prefs.end();
+    }
+    g_bootCount = n;
+    g_bootCountLoaded = true;
+  }
+  return g_bootCount;
+}
+
+static const char *resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "power-on";
+    case ESP_RST_EXT:       return "external pin";
+    case ESP_RST_SW:        return "software (restart/reboot/ota)";
+    case ESP_RST_PANIC:     return "panic / exception";
+    case ESP_RST_INT_WDT:   return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:  return "task watchdog";
+    case ESP_RST_WDT:       return "other watchdog";
+    case ESP_RST_DEEPSLEEP: return "wake from deep sleep";
+    case ESP_RST_BROWNOUT:  return "brownout";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "unknown";
+  }
+}
+
+static const char *wakeCauseStr(esp_sleep_wakeup_cause_t c) {
+  switch (c) {
+    case ESP_SLEEP_WAKEUP_EXT0:      return "external GPIO (ext0)";
+    case ESP_SLEEP_WAKEUP_EXT1:      return "external GPIO (ext1)";
+    case ESP_SLEEP_WAKEUP_TIMER:     return "timer";
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:  return "touch pad";
+    case ESP_SLEEP_WAKEUP_ULP:       return "ULP program";
+    default:                         return "other";
+  }
+}
+
+static int cmd_dmesg(int argc, char **argv, ShellIO &io) {
+  io.out.println(F("=== ESPEShell dmesg ==="));
+  io.out.print(F("boot count   : ")); io.out.println(espeBootCount());
+  io.out.print(F("reset reason : ")); io.out.println(resetReasonStr(esp_reset_reason()));
+  esp_sleep_wakeup_cause_t wc = esp_sleep_get_wakeup_cause();
+  if (wc != ESP_SLEEP_WAKEUP_UNDEFINED) {
+    io.out.print(F("wake cause   : ")); io.out.println(wakeCauseStr(wc));
+  }
+  io.out.print(F("uptime       : ")); io.out.println(uptimeShort());
+  io.out.println(F("(reset reason + boot count only - full panic backtraces/core dumps are not decoded)"));
+  return 0;
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -436,6 +497,7 @@ const Command ESP_CMDS[] = {
   {"ota",     cmd_ota,     "ota <url>",                 "download+flash firmware over HTTP(S)", G_ESP},
   {"sleep",     cmd_sleep,     "sleep <secs>",            "light sleep (RAM kept)",        G_ESP},
   {"deepsleep", cmd_deepsleep, "deepsleep <secs> [pinN v]","deep sleep (resets on wake)",  G_ESP},
+  {"dmesg",     cmd_dmesg,     "dmesg",                   "reset reason, wake cause, boot count", G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
   {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},

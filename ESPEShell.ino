@@ -197,6 +197,7 @@ static void handleSerial() {
 void setup() {
   Serial.begin(115200);
   delay(200);
+  Serial.printf("[boot] #%lu (see 'dmesg' for the reset reason)\n", (unsigned long)espeBootCount());
 
   if (!LittleFS.begin(true)) {   // format on first run / mount failure
     Serial.println(F("[fs] LittleFS mount FAILED"));
