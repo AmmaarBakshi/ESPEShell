@@ -19,10 +19,15 @@ air.
   section 3).
 - Arduino IDE **2.x** *or* `arduino-cli`, with the **esp32** board package by
   Espressif installed.
+- **One external library:** [`PubSubClient`](https://github.com/knolleary/pubsubclient)
+  by knolleary, for the `mqtt` command - install it via **Sketch > Include
+  Library > Manage Libraries...** (search "PubSubClient") in the Arduino IDE,
+  or `arduino-cli lib install PubSubClient`. The sketch will not compile
+  without it.
 
-The sketch uses only libraries bundled with the ESP32 core - `WiFi`, `HTTPClient`,
-`WiFiClientSecure`, `LittleFS`, `Preferences`, `Update`, `ESPmDNS`, `Wire`, and
-FreeRTOS - nothing to install separately.
+Everything else uses libraries bundled with the ESP32 core - `WiFi`,
+`HTTPClient`, `WiFiClientSecure`, `LittleFS`, `Preferences`, `Update`,
+`ESPmDNS`, `Wire`, and FreeRTOS - nothing else to install.
 
 ## 2. Configure (`config.h`)
 
@@ -209,7 +214,31 @@ If a file named **`/boot.sh`** exists, it runs automatically at startup
 (after WiFi/mDNS/Telnet are up), printed to Serial - handy for auto-starting
 a `pin`/`pwm` configuration, printing a custom banner line, etc.
 
-## 9. Commands
+## 9. MQTT (optional - needs the PubSubClient library)
+
+For home-automation/IoT use, `mqtt` connects to a broker and can publish and
+subscribe:
+
+```
+root@esp32:/$ mqtt connect 192.168.1.10
+root@esp32:/$ mqtt sub home/esp32/cmd
+root@esp32:/$ mqtt pub home/esp32/status "up 3h"
+root@esp32:/$
+[mqtt] home/esp32/cmd: restart
+root@esp32:/$
+```
+
+Incoming messages on a subscribed topic print as `[mqtt] topic: payload`
+between prompts (in both Serial and a live Telnet session) without disturbing
+whatever you're mid-typing. `mqtt status` shows the connection state and
+subscribed topics; `mqtt pub <topic> <msg> [-r]` add `-r` to retain. Leave
+`MQTT_BROKER_HOST` in `config.h` set so `mqtt connect` needs no arguments, or
+pass a host (and optional port) each time. Plain MQTT only (port 1883,
+`WiFiClient`) - MQTT-over-TLS (8883) isn't wired up. The default packet
+buffer is ~256 bytes (topic + payload combined), plenty for typical
+on/off/sensor-reading messages but not large payloads.
+
+## 10. Commands
 
 Type `help` for the full grouped list, `help <cmd>` for usage, or `help --esp`
 for the ESP-specific commands. `man`, `whatis` and `apropos` also work.
@@ -223,7 +252,7 @@ Highlights:
 - **Search / scripting:** `grep rg find locate sed awk xargs which type command`
 - **Shell built-ins:** `help man clear sh exit`
 - **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep`
-- **Networking:** `ip wifi ping curl wget dig nslookup ss`
+- **Networking:** `ip wifi mqtt ping curl wget dig nslookup ss`
 - **File transfer:** `send recv`
 - **ESP32:** `tsw pin pwm led sleep deepsleep restart ota dmesg data chip heap
   i2cscan wifiscan`
@@ -249,7 +278,7 @@ Highlights:
 | `restart` / `reboot`           | reboot the ESP32                                         |
 | `chip` / `heap`                | chip info / heap summary                                 |
 
-## 10. Honest limitations
+## 11. Honest limitations
 
 An ESP32 is not a Linux box, so some commands are **stubs** that print why they
 can't run (they're still listed in `help` so nothing silently vanishes):
@@ -276,8 +305,10 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
   connection may drop and need reconnecting after waking - the command still
   blocks and sleeps exactly as asked, this is an honest side effect of the
   radio pausing.
+- `mqtt` is plain MQTT only (no TLS/8883) and does not auto-reconnect after a
+  drop - run `mqtt connect` again. See section 9.
 
-## 11. Project layout
+## 12. Project layout
 
 | File              | Contents                                                |
 | ----------------- | ------------------------------------------------------- |
@@ -291,6 +322,7 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
 | `sys_cmds.cpp`    | system, info, process/job commands                       |
 | `net_cmds.cpp`    | networking + `wifi` (NVS config) + env / echo / printf   |
 | `xfer_cmds.cpp`   | `send` / `recv` base64 file transfer                     |
+| `mqtt_cmds.cpp`   | `mqtt` pub/sub (needs the PubSubClient library)          |
 | `misc_cmds.cpp`   | archive / package-manager stubs                          |
 | `esp_cmds.cpp`    | ESP32-specific commands (GPIO, PWM, sleep, OTA, dmesg, ...) |
 
