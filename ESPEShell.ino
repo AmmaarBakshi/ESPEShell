@@ -60,30 +60,9 @@ static int feedChar(uint8_t c, String &line, Print &out, int echoMode, bool &las
   return 0;
 }
 
-// ============================================================================
-//  WiFi
-// ============================================================================
-static void connectWiFi() {
-  Serial.printf("[wifi] connecting to \"%s\" ", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.setHostname(ESPE_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
-    delay(300);
-    Serial.print('.');
-  }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print(F("[wifi] connected, IP: "));
-    Serial.println(WiFi.localIP());
-    Serial.printf("[wifi] telnet: connect with  telnet %s %d\n",
-                  WiFi.localIP().toString().c_str(), TELNET_PORT);
-  } else {
-    Serial.println(F("[wifi] not connected - running on Serial only"));
-  }
-}
+// WiFi connection is handled by wifiLoadAndConnect() in net_cmds.cpp (reads
+// NVS-saved credentials from `wifi set`, falling back to config.h defaults),
+// shared with the `wifi` command so there is one connection code path.
 
 // ============================================================================
 //  Telnet session
@@ -225,7 +204,7 @@ void setup() {
                   (unsigned)(LittleFS.totalBytes() / 1024));
   }
 
-  connectWiFi();
+  wifiLoadAndConnect(Serial);
   telnetServer.begin();
   telnetServer.setNoDelay(true);
 

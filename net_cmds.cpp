@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 
 // ============================================================================
 //  Networking commands + environment/echo/printf built-ins
@@ -14,6 +15,96 @@ static bool netUp(ShellIO &io) {
   io.out.println(F("network is down (WiFi not connected)"));
   return false;
 }
+
+// ---- WiFi connect (used at boot and by the `wifi` command) ----------------
+bool wifiConnect(const String &ssid, const String &pass, unsigned long timeoutMs, Print &out) {
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setHostname(g_hostname.c_str());
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < timeoutMs) {
+    delay(300);
+    out.print('.');
+  }
+  return WiFi.status() == WL_CONNECTED;
+}
+
+// Reads saved credentials from NVS (set via `wifi set`); falls back to the
+// compiled-in config.h defaults if none have been saved yet. Called once
+// from setup().
+void wifiLoadAndConnect(Print &out) {
+  String ssid, pass;
+  bool haveSaved = false;
+  Preferences prefs;
+  if (prefs.begin(ESPE_PREFS_NAMESPACE, true)) {  // read-only
+    ssid = prefs.getString("ssid", "");
+    pass = prefs.getString("pass", "");
+    prefs.end();
+    haveSaved = ssid.length() > 0;
+  }
+  if (!haveSaved) { ssid = WIFI_SSID; pass = WIFI_PASSWORD; }
+
+  out.printf("[wifi] connecting to \"%s\" (%s) ", ssid.c_str(), haveSaved ? "saved" : "config.h");
+  bool ok = wifiConnect(ssid, pass, WIFI_TIMEOUT_MS, out);
+  out.println();
+  if (ok) {
+    out.print(F("[wifi] connected, IP: "));
+    out.println(WiFi.localIP());
+    out.printf("[wifi] telnet: connect with  telnet %s %d\n", WiFi.localIP().toString().c_str(), TELNET_PORT);
+  } else {
+    out.println(F("[wifi] not connected - running on Serial only (try 'wifi set <ssid> <pass>' once connected some other way, or fix config.h and reflash)"));
+  }
+}
+
+// ---- wifi : runtime WiFi configuration, persisted in NVS -------------------
+static int cmd_wifi(int argc, char **argv, ShellIO &io) {
+  String sub = argc >= 2 ? String(argv[1]) : String("status");
+
+  if (sub == "status") {
+    Preferences prefs;
+    bool haveSaved = false;
+    if (prefs.begin(ESPE_PREFS_NAMESPACE, true)) { haveSaved = prefs.getString("ssid", "").length() > 0; prefs.end(); }
+    io.out.print(F("credentials : ")); io.out.println(haveSaved ? F("saved in NVS (from 'wifi set')") : F("config.h default"));
+    io.out.print(F("state       : "));
+    if (WiFi.status() == WL_CONNECTED) {
+      io.out.print(F("connected to \"")); io.out.print(WiFi.SSID()); io.out.println('"');
+      io.out.print(F("  ip   : ")); io.out.println(WiFi.localIP());
+      io.out.print(F("  rssi : ")); io.out.print(WiFi.RSSI()); io.out.println(F(" dBm"));
+    } else {
+      io.out.println(F("disconnected"));
+    }
+    return 0;
+  }
+
+  if (sub == "set") {
+    if (argc < 4) { io.out.println(F("usage: wifi set <ssid> <password>")); return 1; }
+    String ssid = argv[2], pass = argv[3];
+    Preferences prefs;
+    if (!prefs.begin(ESPE_PREFS_NAMESPACE, false)) { io.out.println(F("wifi: failed to open NVS storage")); return 1; }
+    prefs.putString("ssid", ssid);
+    prefs.putString("pass", pass);
+    prefs.end();
+    io.out.println(F("saved to NVS. connecting now..."));
+    WiFi.disconnect();
+    bool ok = wifiConnect(ssid, pass, WIFI_TIMEOUT_MS, io.out);
+    io.out.println();
+    if (ok) { io.out.print(F("connected, ip=")); io.out.println(WiFi.localIP()); }
+    else io.out.println(F("could not connect with the new credentials (still saved - will retry on next boot)"));
+    return ok ? 0 : 1;
+  }
+
+  if (sub == "forget") {
+    Preferences prefs;
+    if (prefs.begin(ESPE_PREFS_NAMESPACE, false)) { prefs.clear(); prefs.end(); }
+    io.out.println(F("saved WiFi credentials cleared - config.h defaults will be used on next boot"));
+    return 0;
+  }
+
+  io.out.println(F("usage: wifi status | wifi set <ssid> <pass> | wifi forget"));
+  return 1;
+}
+
 
 static int maskBits(IPAddress m) {
   uint32_t v = (uint32_t)m;
@@ -284,6 +375,7 @@ static int cmd_printf(int argc, char **argv, ShellIO &io) {
 
 const Command NET_CMDS[] = {
   {"ip",         cmd_ip,         "ip [addr|link|route]", "show network configuration",   G_NET},
+  {"wifi",       cmd_wifi,       "wifi status|set <s> <p>|forget", "configure WiFi (persists in NVS)", G_NET},
   {"ping",       cmd_ping,       "ping [-c N] host",     "TCP reachability check",        G_NET},
   {"curl",       cmd_curl,       "curl [-o f] URL",      "HTTP(S) GET to stdout/file",    G_NET},
   {"wget",       cmd_wget,       "wget [-O f] URL",      "download a URL to a file",      G_NET},

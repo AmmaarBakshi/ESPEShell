@@ -96,6 +96,10 @@ bool matchWild(const String &text, const String &pat);   // glob: * and ?
 String humanBytes(uint64_t n);
 String expandVars(const String &s);
 
+// ---- WiFi (net_cmds.cpp) - used at boot and by the `wifi` command ----------
+bool wifiConnect(const String &ssid, const String &pass, unsigned long timeoutMs, Print &out);
+void wifiLoadAndConnect(Print &out);   // reads NVS-saved creds, else config.h; called once from setup()
+
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);
 int  runLine(const String &line, Print &realOut);   // pipes + redirection
