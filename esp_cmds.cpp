@@ -27,7 +27,7 @@ static bool usablePin(int p) { return p >= 0 && p <= 39 && !isFlash(p); }
 
 static const char *modeName(int p) {
   if (!g_pinSet[p]) return "-";
-  switch (g_pinMode[p]) { case 0: return "INPUT"; case 1: return "OUTPUT"; case 2: return "PULLUP"; }
+  switch (g_pinMode[p]) { case 0: return "INPUT"; case 1: return "OUTPUT"; case 2: return "PULLUP"; case 3: return "PWM"; }
   return "?";
 }
 
@@ -161,6 +161,7 @@ static int cmd_pwm(int argc, char **argv, ShellIO &io) {
       ledcDetachPin(p);
 #endif
       g_pwmSet[p] = false;
+      g_pinSet[p] = false;   // no longer claimed (keeps `pin --used` honest)
     }
     io.out.printf("GPIO%d: PWM off\n", p);
     return 0;
@@ -183,6 +184,7 @@ static int cmd_pwm(int argc, char **argv, ShellIO &io) {
     g_pwmChan[p] = ch;
 #endif
     g_pwmSet[p] = true;
+    g_pinSet[p] = true; g_pinMode[p] = 3;   // show up in `pin --used` as PWM
   } else if (argc >= 4) {
 #if ESPE_LEDC_NEW_API
     ledcChangeFrequency(p, freq, 8);
@@ -244,8 +246,18 @@ static const char *encName(wifi_auth_mode_t enc) {
 
 static int cmd_wifiscan(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Scanning WiFi networks (may briefly pause the current connection)..."));
+  if (WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_STA);
+  // An in-progress (re)connect attempt blocks the scan and makes it fail -
+  // stop it first when we aren't actually associated to anything.
+  if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false, false);
+  WiFi.scanDelete();
   int n = WiFi.scanNetworks();
-  if (n < 0) { io.out.println(F("wifiscan: scan failed")); return 1; }
+  if (n < 0) {           // radio may still have been busy: one retry
+    delay(400);
+    WiFi.scanDelete();
+    n = WiFi.scanNetworks();
+  }
+  if (n < 0) { io.out.printf("wifiscan: scan failed (code %d)\n", n); return 1; }
   if (n == 0) { io.out.println(F("no networks found")); return 0; }
   io.out.println(F("  RSSI  CH  ENC        SSID"));
   for (int i = 0; i < n; ++i)
@@ -261,7 +273,12 @@ static bool g_ledOn = false;
 static bool g_ledInit = false;
 
 static int cmd_led(int argc, char **argv, ShellIO &io) {
-  if (!g_ledInit) { pinMode(ESPE_ONBOARD_LED_PIN, OUTPUT); g_ledInit = true; }
+  if (!g_ledInit) {
+    pinMode(ESPE_ONBOARD_LED_PIN, OUTPUT);
+    g_ledInit = true;
+    g_pinSet[ESPE_ONBOARD_LED_PIN] = true;   // show up in `pin --used`
+    g_pinMode[ESPE_ONBOARD_LED_PIN] = 1;
+  }
   String a = argc >= 2 ? String(argv[1]) : String("status");
   if (a == "on") g_ledOn = true;
   else if (a == "off") g_ledOn = false;
