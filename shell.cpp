@@ -501,12 +501,44 @@ static int cmd_exit(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- sh : run stored shell commands from a LittleFS file -------------------
+// Also used to auto-run /boot.sh at startup (see ESPEShell.ino's setup()).
+static int cmd_sh(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: sh <file>   (runs one shell command per line)")); return 1; }
+  String abs = resolvePath(argv[1]);
+  File f = LittleFS.open(abs, "r");
+  if (!f || f.isDirectory()) {
+    io.out.print(argv[1]); io.out.println(F(": cannot read"));
+    if (f) f.close();
+    return 1;
+  }
+  String content;
+  uint8_t buf[128];
+  while (true) {
+    int n = f.read(buf, sizeof(buf));
+    if (n <= 0) break;
+    for (int k = 0; k < n; ++k) content += (char)buf[k];
+  }
+  f.close();
+
+  std::vector<String> lines;
+  splitLines(content, lines);
+  int rc = 0;
+  for (auto &l : lines) {
+    String t = l; t.trim();
+    if (t.length() == 0 || t[0] == '#') continue;  // blank lines / comments
+    rc = runLine(l, io.out);
+  }
+  return rc;
+}
+
 const Command CORE_CMDS[] = {
   {"help",    cmd_help,    "help [--esp] [cmd]",  "list commands or show usage for one", G_CORE},
   {"man",     cmd_man,     "man <cmd>",           "show the manual entry for a command", G_CORE},
   {"whatis",  cmd_whatis,  "whatis <cmd>...",     "one-line description of a command",   G_CORE},
   {"apropos", cmd_apropos, "apropos <keyword>",   "search commands by keyword",          G_CORE},
   {"clear",   cmd_clear,   "clear",               "clear the screen",                    G_CORE},
+  {"sh",      cmd_sh,      "sh <file>",           "run stored shell commands from a file",G_CORE},
   {"exit",    cmd_exit,    "exit",                "end this session (Telnet)",           G_CORE},
   {"logout",  cmd_exit,    "logout",              "end this session (Telnet)",           G_CORE},
 };

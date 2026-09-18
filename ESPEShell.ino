@@ -220,6 +220,13 @@ void setup() {
 
   CountingPrint cp(Serial);
   printBanner(cp);
+
+  if (LittleFS.exists("/boot.sh")) {
+    cp.println(F("[boot] running /boot.sh ..."));
+    runLine("sh /boot.sh", cp);
+    cp.println(F("[boot] done."));
+  }
+
   printPrompt(cp);
 }
 
