@@ -10,10 +10,14 @@
 // ---- I/O abstraction -------------------------------------------------------
 // Every command writes to `out`. If the command was on the right side of a
 // pipe, `in` points at the previous stage's captured output; otherwise null.
+// `rawIn`, when non-null, is the live underlying connection (Serial or the
+// current Telnet client) - used by commands like `recv` that need to read
+// raw pasted bytes directly rather than piped shell text.
 struct ShellIO {
   Print &out;
   const String *in;
-  ShellIO(Print &o, const String *i = nullptr) : out(o), in(i) {}
+  Stream *rawIn;
+  ShellIO(Print &o, const String *i = nullptr, Stream *r = nullptr) : out(o), in(i), rawIn(r) {}
   bool hasIn() const { return in != nullptr; }
 };
 
@@ -31,6 +35,7 @@ enum {
   G_ARCHIVE,
   G_ESP,
   G_CORE,
+  G_XFER,
   G_COUNT
 };
 
@@ -57,6 +62,7 @@ extern const Command SYS_CMDS[];     extern const size_t SYS_CMDS_N;
 extern const Command NET_CMDS[];     extern const size_t NET_CMDS_N;
 extern const Command MISC_CMDS[];    extern const size_t MISC_CMDS_N;
 extern const Command ESP_CMDS[];     extern const size_t ESP_CMDS_N;
+extern const Command XFER_CMDS[];    extern const size_t XFER_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -107,6 +113,6 @@ uint32_t espeBootCount();
 
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);
-int  runLine(const String &line, Print &realOut);   // pipes + redirection
+int  runLine(const String &line, Print &realOut, Stream *rawIn = nullptr);   // pipes + redirection
 void printPrompt(Print &out);
 void printBanner(Print &out);

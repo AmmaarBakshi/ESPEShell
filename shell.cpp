@@ -234,6 +234,7 @@ const char *groupName(uint8_t g) {
     case G_ARCHIVE: return "Archive / packages";
     case G_ESP:     return "ESP32 specific";
     case G_CORE:    return "Shell built-ins";
+    case G_XFER:    return "File transfer";
     default:        return "Other";
   }
 }
@@ -309,7 +310,7 @@ static bool parseRedirect(std::vector<String> &args, String &redir, bool &append
 // ============================================================================
 //  Dispatch: pipes + redirection
 // ============================================================================
-int runLine(const String &lineIn, Print &realOut) {
+int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
   String line = lineIn;
   line.trim();
   if (line.length() == 0) return 0;
@@ -353,7 +354,7 @@ int runLine(const String &lineIn, Print &realOut) {
     if (last && !hasRedir) outp = &realOut;
     else outp = &sbuf;  // capture (piped stage, or redirected last stage)
 
-    ShellIO io(*outp, haveIn ? &stageIn : nullptr);
+    ShellIO io(*outp, haveIn ? &stageIn : nullptr, rawIn);
     rc = c->fn((int)argv.size(), argv.data(), io);
 
     if (last) {
@@ -556,5 +557,6 @@ const CmdTable CMD_TABLES[] = {
   {NET_CMDS, NET_CMDS_N},
   {MISC_CMDS, MISC_CMDS_N},
   {ESP_CMDS, ESP_CMDS_N},
+  {XFER_CMDS, XFER_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);

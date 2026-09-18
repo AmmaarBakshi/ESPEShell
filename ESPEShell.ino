@@ -163,7 +163,7 @@ static void handleTelnet() {
         g_telnetPeer = "";
         return;
       }
-      runLine(tnLine, cp);
+      runLine(tnLine, cp, &telnetClient);
       tnLine = "";
       printPrompt(cp);
     } else if (r == 2) {
@@ -182,7 +182,7 @@ static void handleSerial() {
     g_bytesIn++;
     int r = feedChar(b, serLine, cp, 1, serLastCR);
     if (r == 1) {
-      runLine(serLine, cp);
+      runLine(serLine, cp, &Serial);
       serLine = "";
       printPrompt(cp);
     } else if (r == 2) {
