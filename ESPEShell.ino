@@ -25,9 +25,8 @@ static int  tnIac = 0;          // telnet IAC skip state machine
 static bool tnLastCR = false;
 static String tnLine;
 
-// ---- Serial session ---------------------------------------------------------
-static bool serLastCR = false;
-static String serLine;
+// Serial session state (serSt, a LineEditState) is declared below, next to
+// the line editor it belongs to.
 
 // A Print wrapper that counts bytes for the `data` command.
 class CountingPrint : public Print {
@@ -40,23 +39,86 @@ class CountingPrint : public Print {
 
 // ============================================================================
 //  Line editor
-//  echoMode: 0 = no echo, 1 = echo char, 2 = echo '*'
 //  returns: 0 = nothing yet, 1 = line ready, 2 = line cancelled (Ctrl-C)
 // ============================================================================
-static int feedChar(uint8_t c, String &line, Print &out, int echoMode, bool &lastCR) {
+
+// Password entry only (Telnet auth): plain char echo as '*', no history/tab -
+// getting these wrong for a password field is worse than not having them.
+static int feedAuthChar(uint8_t c, String &line, Print &out, bool &lastCR) {
   if (c == '\r') { lastCR = true; out.print("\r\n"); return 1; }
   if (c == '\n') { if (lastCR) { lastCR = false; return 0; } out.print("\r\n"); return 1; }
   lastCR = false;
-  if (c == 0x03) { line = ""; out.print("^C\r\n"); return 2; }          // Ctrl-C
-  if (c == 0x08 || c == 0x7f) {                                          // backspace
-    if (line.length()) { line.remove(line.length() - 1); if (echoMode == 1) out.print("\b \b"); }
+  if (c == 0x03) { line = ""; out.print("^C\r\n"); return 2; }
+  if (c == 0x08 || c == 0x7f) {
+    if (line.length()) { line.remove(line.length() - 1); out.print("\b \b"); }
     return 0;
   }
-  if (c == '\t') c = ' ';
+  if (c >= 0x20 && c < 0x7f) { line += (char)c; out.write('*'); }
+  return 0;
+}
+
+// Per-session state for the rich shell-mode line editor.
+struct LineEditState {
+  String line;
+  bool lastCR = false;
+  uint8_t escState = 0;   // 0 = normal, 1 = saw ESC, 2 = saw ESC [
+  int histBrowse = -1;    // -1 = not browsing history; else 0 = most recent
+  String savedLine;       // what was typed before Up was first pressed
+};
+static LineEditState serSt;
+static LineEditState tnSt;
+
+// Redraws the in-progress line: return to column 0, reprint the prompt,
+// erase to end of line, print the (possibly new) line content.
+static void redrawLine(Print &out, const String &line) {
+  out.print('\r');
+  printPrompt(out);
+  out.print("\033[K");
+  out.print(line);
+}
+
+// Shell-mode line editor: backspace, Ctrl-C, Tab completion, Up/Down history.
+// Left/Right/Home/End arrow sequences are recognized and swallowed (not
+// supported - no mid-line cursor) rather than leaking escape bytes into the
+// line buffer.
+static int feedShellChar(uint8_t c, LineEditState &st, Print &out) {
+  if (st.escState == 1) { st.escState = (c == '[') ? 2 : 0; return 0; }
+  if (st.escState == 2) {
+    st.escState = 0;
+    if (c == 'A' || c == 'B') {  // up / down
+      size_t n = historyCount();
+      if (n > 0) {
+        if (st.histBrowse == -1) st.savedLine = st.line;
+        if (c == 'A') { if (st.histBrowse + 1 < (int)n) st.histBrowse++; }
+        else          { if (st.histBrowse > -1) st.histBrowse--; }
+        st.line = (st.histBrowse == -1) ? st.savedLine : historyGet(st.histBrowse);
+        redrawLine(out, st.line);
+      }
+    }
+    return 0;  // left/right/home/end/etc: swallowed, no-op
+  }
+  if (c == 0x1b) { st.escState = 1; return 0; }  // ESC: start of an arrow-key sequence
+
+  if (c == '\t') {
+    String completed = completeLine(st.line, out);
+    if (completed != st.line) { st.line = completed; }
+    redrawLine(out, st.line);   // also redraws candidate lists back to a clean prompt
+    return 0;
+  }
+
+  if (c == '\r') { st.lastCR = true; out.print("\r\n"); return 1; }
+  if (c == '\n') { if (st.lastCR) { st.lastCR = false; return 0; } out.print("\r\n"); return 1; }
+  st.lastCR = false;
+
+  if (c == 0x03) { st.line = ""; st.histBrowse = -1; out.print("^C\r\n"); return 2; }
+  if (c == 0x08 || c == 0x7f) {
+    if (st.line.length()) { st.line.remove(st.line.length() - 1); out.print("\b \b"); }
+    return 0;
+  }
   if (c >= 0x20 && c < 0x7f) {
-    line += (char)c;
-    if (echoMode == 1) out.write(c);
-    else if (echoMode == 2) out.write('*');
+    st.histBrowse = -1;
+    st.line += (char)c;
+    out.write(c);
   }
   return 0;
 }
@@ -99,6 +161,7 @@ static void handleTelnet() {
       telnetClient.setNoDelay(true);
       g_telnetPeer = telnetClient.remoteIP().toString();
       tnLine = ""; tnLastCR = false; tnIac = 0;
+      tnSt = LineEditState();   // fresh line-editor state for the new connection
       CountingPrint cp(telnetClient);
       tnSendOpts();
       cp.println(F("Connected to ESPEShell."));
@@ -127,11 +190,12 @@ static void handleTelnet() {
     if (b == 255)  { tnIac = 1; continue; }
 
     if (tnState == T_AUTH) {
-      int r = feedChar(b, tnLine, cp, 2, tnLastCR);
+      int r = feedAuthChar(b, tnLine, cp, tnLastCR);
       if (r == 1) {
         if (tnLine == g_telnetPassword) {
           cp.println(F("Login OK."));
           tnState = T_SHELL;
+          tnSt = LineEditState();   // fresh line-editor state for the shell session
           printBanner(cp);
           printPrompt(cp);
         } else {
@@ -153,9 +217,9 @@ static void handleTelnet() {
     }
 
     // T_SHELL
-    int r = feedChar(b, tnLine, cp, 1, tnLastCR);
+    int r = feedShellChar(b, tnSt, cp);
     if (r == 1) {
-      String t = tnLine; t.trim();
+      String t = tnSt.line; t.trim();
       if (t == "exit" || t == "logout") {
         cp.println(F("logout"));
         telnetClient.stop();
@@ -163,10 +227,12 @@ static void handleTelnet() {
         g_telnetPeer = "";
         return;
       }
-      runLine(tnLine, cp, &telnetClient);
-      tnLine = "";
+      historyAdd(tnSt.line);
+      runLine(tnSt.line, cp, &telnetClient);
+      tnSt.line = ""; tnSt.histBrowse = -1;
       printPrompt(cp);
     } else if (r == 2) {
+      tnSt.histBrowse = -1;
       printPrompt(cp);
     }
   }
@@ -180,12 +246,14 @@ static void handleSerial() {
   while (Serial.available()) {
     uint8_t b = (uint8_t)Serial.read();
     g_bytesIn++;
-    int r = feedChar(b, serLine, cp, 1, serLastCR);
+    int r = feedShellChar(b, serSt, cp);
     if (r == 1) {
-      runLine(serLine, cp, &Serial);
-      serLine = "";
+      historyAdd(serSt.line);
+      runLine(serSt.line, cp, &Serial);
+      serSt.line = ""; serSt.histBrowse = -1;
       printPrompt(cp);
     } else if (r == 2) {
+      serSt.histBrowse = -1;
       printPrompt(cp);
     }
   }

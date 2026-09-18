@@ -85,6 +85,18 @@ void   envSet(const String &key, const String &val);
 bool   envUnset(const String &key);
 const std::vector<std::pair<String, String>> &envAll();
 
+// ---- Command history (interactive lines only - see ESPEShell.ino) ---------
+void   historyAdd(const String &line);
+size_t historyCount();
+String historyGet(int indexFromEnd);   // 0 = most recently added
+
+// ---- Tab completion ---------------------------------------------------------
+// Completes the last token of `partial`: a command name if it's the first
+// token, else a path relative to the cwd. Returns the completed line on a
+// unique match; on multiple matches it prints the candidates to `out` and
+// returns `partial` unchanged; on no match it also returns `partial` unchanged.
+String completeLine(const String &partial, Print &out);
+
 // ---- Path helpers ----------------------------------------------------------
 String normalizePath(const String &path);          // collapse . .. //, leading /
 String resolvePath(const String &p);               // relative to g_cwd

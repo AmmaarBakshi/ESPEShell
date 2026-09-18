@@ -112,6 +112,93 @@ bool isDir(const String &abs) {
 }
 
 // ============================================================================
+//  Command history
+// ============================================================================
+#define HISTORY_MAX 30
+static std::vector<String> s_history;   // s_history.back() is the most recent
+
+void historyAdd(const String &line) {
+  String t = line; t.trim();
+  if (t.length() == 0) return;
+  if (!s_history.empty() && s_history.back() == t) return;  // skip immediate repeats
+  s_history.push_back(t);
+  if (s_history.size() > HISTORY_MAX) s_history.erase(s_history.begin());
+}
+
+size_t historyCount() { return s_history.size(); }
+
+String historyGet(int indexFromEnd) {
+  int i = (int)s_history.size() - 1 - indexFromEnd;
+  if (i < 0 || i >= (int)s_history.size()) return "";
+  return s_history[i];
+}
+
+// ============================================================================
+//  Tab completion
+// ============================================================================
+String completeLine(const String &partial, Print &out) {
+  int sp = partial.length();
+  while (sp > 0 && partial[sp - 1] != ' ') sp--;
+  String head = partial.substring(0, sp);   // text before the token (kept as-is)
+  String tok = partial.substring(sp);        // the token being completed
+  bool firstToken = (head.length() == 0);
+
+  std::vector<String> matches;
+  String commonPrefix;
+
+  auto consider = [&](const String &full) {
+    if (!full.startsWith(tok)) return;
+    matches.push_back(full);
+    if (matches.size() == 1) { commonPrefix = full; return; }
+    size_t k = 0;
+    while (k < commonPrefix.length() && k < full.length() && commonPrefix[k] == full[k]) k++;
+    commonPrefix = commonPrefix.substring(0, k);
+  };
+
+  if (firstToken) {
+    for (size_t t = 0; t < CMD_TABLE_COUNT; ++t) {
+      const CmdTable &tab = CMD_TABLES[t];
+      for (size_t i = 0; i < tab.count; ++i) consider(String(tab.cmds[i].name));
+    }
+  } else {
+    String dirPart, leafPrefix;
+    int slash = tok.lastIndexOf('/');
+    if (slash < 0) { leafPrefix = tok; }
+    else { dirPart = tok.substring(0, slash + 1); leafPrefix = tok.substring(slash + 1); }
+    String absDir = dirPart.length() ? resolvePath(dirPart) : g_cwd;
+    if (isDir(absDir)) {
+      File d = LittleFS.open(absDir);
+      if (d) {
+        File e = d.openNextFile();
+        while (e) {
+          String nm = String(e.name());
+          int sl = nm.lastIndexOf('/');
+          if (sl >= 0) nm = nm.substring(sl + 1);
+          bool dir = e.isDirectory();
+          e.close();
+          if (nm.startsWith(leafPrefix)) consider(dirPart + nm + (dir ? "/" : ""));
+          e = d.openNextFile();
+        }
+        d.close();
+      }
+    }
+  }
+
+  if (matches.empty()) return partial;
+  if (matches.size() == 1) return head + matches[0] + (firstToken ? " " : "");
+  if (commonPrefix.length() > tok.length()) return head + commonPrefix;
+
+  out.println();
+  String row;
+  for (size_t i = 0; i < matches.size(); ++i) {
+    row += matches[i]; row += "  ";
+    if (row.length() > 60) { out.println(row); row = ""; }
+  }
+  if (row.length()) out.println(row);
+  return partial;
+}
+
+// ============================================================================
 //  Shared command helpers
 // ============================================================================
 bool collectInput(int argc, char **argv, int firstFileArg, ShellIO &io, String &out) {
