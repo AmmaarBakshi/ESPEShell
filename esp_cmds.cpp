@@ -222,6 +222,35 @@ static int cmd_i2cscan(int argc, char **argv, ShellIO &io) {
   return found ? 0 : 1;
 }
 
+// ---- wifiscan -------------------------------------------------------------
+static const char *encName(wifi_auth_mode_t enc) {
+  switch (enc) {
+    case WIFI_AUTH_OPEN:            return "OPEN";
+    case WIFI_AUTH_WEP:             return "WEP";
+    case WIFI_AUTH_WPA_PSK:         return "WPA";
+    case WIFI_AUTH_WPA2_PSK:        return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2";
+    case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-ENT";
+    case WIFI_AUTH_WPA3_PSK:        return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3";
+    default:                        return "?";
+  }
+}
+
+static int cmd_wifiscan(int argc, char **argv, ShellIO &io) {
+  io.out.println(F("Scanning WiFi networks (may briefly pause the current connection)..."));
+  int n = WiFi.scanNetworks();
+  if (n < 0) { io.out.println(F("wifiscan: scan failed")); return 1; }
+  if (n == 0) { io.out.println(F("no networks found")); return 0; }
+  io.out.println(F("  RSSI  CH  ENC        SSID"));
+  for (int i = 0; i < n; ++i)
+    io.out.printf("  %4d  %2d  %-9s  %s\n", WiFi.RSSI(i), WiFi.channel(i),
+                  encName(WiFi.encryptionType(i)), WiFi.SSID(i).c_str());
+  io.out.printf("%d network(s) found\n", n);
+  WiFi.scanDelete();
+  return 0;
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -276,6 +305,7 @@ const Command ESP_CMDS[] = {
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
+  {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
   {"reboot",  cmd_restart, "reboot",             "reboot the ESP32",                    G_ESP},
   {"data",    cmd_data,    "data",               "live runtime data snapshot",          G_ESP},
