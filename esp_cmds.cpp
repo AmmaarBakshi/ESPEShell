@@ -251,6 +251,22 @@ static int cmd_wifiscan(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- led : onboard LED (DevKit V1: GPIO2) ----------------------------------
+static bool g_ledOn = false;
+static bool g_ledInit = false;
+
+static int cmd_led(int argc, char **argv, ShellIO &io) {
+  if (!g_ledInit) { pinMode(ESPE_ONBOARD_LED_PIN, OUTPUT); g_ledInit = true; }
+  String a = argc >= 2 ? String(argv[1]) : String("status");
+  if (a == "on") g_ledOn = true;
+  else if (a == "off") g_ledOn = false;
+  else if (a == "toggle") g_ledOn = !g_ledOn;
+  else if (a != "status") { io.out.println(F("usage: led on|off|toggle|status")); return 1; }
+  digitalWrite(ESPE_ONBOARD_LED_PIN, g_ledOn ? HIGH : LOW);
+  io.out.printf("onboard LED (GPIO%d): %s\n", ESPE_ONBOARD_LED_PIN, g_ledOn ? "on" : "off");
+  return 0;
+}
+
 // ---- restart / reboot ------------------------------------------------------
 static int cmd_restart(int argc, char **argv, ShellIO &io) {
   io.out.println(F("Restarting ESP32..."));
@@ -304,6 +320,7 @@ const Command ESP_CMDS[] = {
   {"tsw",     cmd_tsw,     "tsw",                "time since wake (uptime)",            G_ESP},
   {"pin",     cmd_pin,     "pin [--all|mode|..]","inspect / drive GPIO pins",           G_ESP},
   {"pwm",     cmd_pwm,     "pwm <pin> <duty> [freq]|off|--status","software PWM output (LEDC)",  G_ESP},
+  {"led",     cmd_led,     "led on|off|toggle|status", "onboard LED (DevKit V1: GPIO2)",G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
   {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
