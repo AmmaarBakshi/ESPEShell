@@ -85,22 +85,26 @@ Highlights:
 - **Search / scripting:** `grep rg find locate sed awk xargs which type command`
 - **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep`
 - **Networking:** `ip ping curl wget dig nslookup ss`
-- **ESP32:** `tsw pin restart data chip heap`
+- **ESP32:** `tsw pin pwm restart data chip heap i2cscan wifiscan`
 
 ### ESP-specific
 
-| Command                 | What it does                                             |
-| ----------------------- | -------------------------------------------------------- |
-| `tsw`                   | time since wake (uptime)                                 |
-| `pin --status`          | list usable GPIOs with mode + level                      |
-| `pin --all`             | every GPIO 0–39 (flags flash / input-only / strapping)   |
-| `pin --used` / `--free` | pins you've configured / not yet configured              |
-| `pin mode <n> in\|out\|up` | set a pin's mode                                      |
-| `pin read <n>` / `aread <n>` | digital / analog read                              |
-| `pin write <n> <0\|1>`  | drive a pin high/low                                     |
-| `data`                  | live snapshot: heap, RSSI, uptime, bytes in/out, tasks   |
-| `restart` / `reboot`    | reboot the ESP32                                         |
-| `chip` / `heap`         | chip info / heap summary                                 |
+| Command                    | What it does                                            |
+| --------------------------- | -------------------------------------------------------- |
+| `tsw`                       | time since wake (uptime)                                 |
+| `pin --status`               | list usable GPIOs with mode + level                      |
+| `pin --all`                  | every GPIO 0–39 (flags flash / input-only / strapping)   |
+| `pin --used` / `--free`      | pins you've configured / not yet configured              |
+| `pin mode <n> in\|out\|up`   | set a pin's mode                                         |
+| `pin read <n>` / `aread <n>` | digital / analog read                                    |
+| `pin write <n> <0\|1>`       | drive a pin high/low                                     |
+| `pwm <n> <duty> [freq]`      | PWM output on a pin (LEDC), duty 0–255, freq default 5kHz|
+| `pwm <n> off` / `--status`   | stop PWM on a pin / list configured PWM pins             |
+| `i2cscan [-sda P] [-scl P]`  | probe the I2C bus, print addresses that answer           |
+| `wifiscan`                   | list nearby WiFi networks (RSSI, channel, security)      |
+| `data`                       | live snapshot: heap, RSSI, uptime, bytes in/out, tasks   |
+| `restart` / `reboot`         | reboot the ESP32                                         |
+| `chip` / `heap`              | chip info / heap summary                                 |
 
 ## 6. Honest limitations
 
