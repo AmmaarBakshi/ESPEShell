@@ -275,7 +275,53 @@ static int cmd_neofetch(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- cpufreq : trade speed for power ---------------------------------------
+// Only a few divisors of the 240 MHz PLL are valid; below 80 MHz the radio
+// stops working, which is exactly why you'd do it (battery runs with WiFi off).
+static int cmd_cpufreq(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    io.out.printf("cpu frequency: %u MHz  (xtal %u MHz, APB %lu Hz)\n",
+                  (unsigned)getCpuFrequencyMhz(), (unsigned)getXtalFrequencyMhz(),
+                  (unsigned long)getApbFrequency());
+    io.out.println(F("usage: cpufreq <240|160|80|40|20|10>   (below 80 MHz the radio stops)"));
+    return 0;
+  }
+  int mhz = atoi(argv[1]);
+  const int allowed[] = {240, 160, 80, 40, 20, 10};
+  bool ok = false;
+  for (int a : allowed) if (a == mhz) ok = true;
+  if (!ok) { io.out.println(F("cpufreq: pick one of 240 160 80 40 20 10 MHz")); return 1; }
+
+  if (mhz < 80 && WiFi.status() == WL_CONNECTED)
+    io.out.println(F("cpufreq: warning - WiFi (and this Telnet session) needs at least 80 MHz"));
+
+  if (!setCpuFrequencyMhz(mhz)) { io.out.println(F("cpufreq: the chip refused that frequency")); return 1; }
+  io.out.printf("cpu frequency now %u MHz\n", (unsigned)getCpuFrequencyMhz());
+  return 0;
+}
+
+// ---- mkfs : reformat LittleFS ----------------------------------------------
+static int cmd_mkfs(int argc, char **argv, ShellIO &io) {
+  if (argc < 2 || String(argv[1]) != "--force") {
+    io.out.println(F("mkfs: this erases every file on the board, including /boot.sh."));
+    io.out.printf("      %s used of %s now.\n",
+                  humanBytes(LittleFS.usedBytes()).c_str(), humanBytes(LittleFS.totalBytes()).c_str());
+    io.out.println(F("      Re-run as: mkfs --force"));
+    return 1;
+  }
+  io.out.println(F("formatting LittleFS ..."));
+  LittleFS.end();
+  bool ok = LittleFS.format();
+  LittleFS.begin(true);
+  g_cwd = "/";
+  if (!ok) { io.out.println(F("mkfs: format failed")); return 1; }
+  io.out.printf("mkfs: done - %s free\n", humanBytes(LittleFS.totalBytes() - LittleFS.usedBytes()).c_str());
+  return 0;
+}
+
 const Command DIAG_CMDS[] = {
+  {"cpufreq",  cmd_cpufreq,  "cpufreq [mhz]",         "show / set the CPU frequency",    G_ESP},
+  {"mkfs",     cmd_mkfs,     "mkfs --force",          "reformat LittleFS (erases all)",  G_FS},
   {"neofetch", cmd_neofetch, "neofetch",              "the whole board at a glance",     G_ESP},
   {"sysinfo",  cmd_neofetch, "sysinfo",               "the whole board at a glance",     G_ESP},
   {"bench", cmd_bench, "bench [cpu|fs]",             "quick CPU / filesystem benchmark", G_ESP},
