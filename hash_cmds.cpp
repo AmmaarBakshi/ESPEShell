@@ -2,6 +2,7 @@
 #include <LittleFS.h>
 #include <MD5Builder.h>
 #include "mbedtls/sha256.h"
+#include "esp_random.h"
 
 // ============================================================================
 //  Checksums and digests: md5sum, sha256sum, crc32.
@@ -190,7 +191,55 @@ static int cmd_base64(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- rand / uuid : the hardware RNG ----------------------------------------
+// esp_random() is a true RNG while the radio is on (and a decent PRNG when it
+// isn't), so there is no seeding to get wrong here.
+static int cmd_rand(int argc, char **argv, ShellIO &io) {
+  long lo = 0, hi = 0;
+  int count = 1;
+  int i = 1;
+  if (i < argc && String(argv[i]) == "-n" && i + 1 < argc) { count = String(argv[++i]).toInt(); i++; }
+  if (i < argc) {
+    long a = String(argv[i]).toInt();
+    if (i + 1 < argc) { lo = a; hi = String(argv[i + 1]).toInt(); }
+    else { lo = 0; hi = a; }
+  } else {
+    lo = 0; hi = 0;   // no range: print a raw 32-bit value
+  }
+  if (count < 1) count = 1;
+  if (count > 1000) count = 1000;
+  if (hi < lo) { long t = lo; lo = hi; hi = t; }
+
+  for (int k = 0; k < count; ++k) {
+    uint32_t r = esp_random();
+    if (hi == lo) io.out.println((unsigned long)r);
+    else io.out.println((long)(lo + (long)(r % (uint32_t)(hi - lo + 1))));
+  }
+  return 0;
+}
+
+static int cmd_uuid(int argc, char **argv, ShellIO &io) {
+  int count = (argc >= 2) ? String(argv[1]).toInt() : 1;
+  if (count < 1) count = 1;
+  if (count > 100) count = 100;
+  for (int k = 0; k < count; ++k) {
+    uint8_t b[16];
+    for (int i = 0; i < 16; i += 4) {
+      uint32_t r = esp_random();
+      b[i] = r >> 24; b[i + 1] = r >> 16; b[i + 2] = r >> 8; b[i + 3] = r;
+    }
+    b[6] = (b[6] & 0x0F) | 0x40;   // version 4
+    b[8] = (b[8] & 0x3F) | 0x80;   // variant 1
+    String h = hexOf(b, 16);
+    io.out.println(h.substring(0, 8) + "-" + h.substring(8, 12) + "-" + h.substring(12, 16) +
+                   "-" + h.substring(16, 20) + "-" + h.substring(20));
+  }
+  return 0;
+}
+
 const Command HASH_CMDS[] = {
+  {"rand",      cmd_rand,      "rand [-n N] [lo] hi", "random numbers (hardware RNG)",   G_TEXT},
+  {"uuid",      cmd_uuid,      "uuid [count]",        "random v4 UUIDs",                 G_TEXT},
   {"base64",    cmd_base64,    "base64 [-d] [file]",  "base64 encode / decode",          G_TEXT},
   {"md5sum",    cmd_md5sum,    "md5sum <file>...",    "MD5 digest of files / stdin",     G_TEXT},
   {"sha256sum", cmd_sha256sum, "sha256sum <file>...", "SHA-256 digest of files / stdin", G_TEXT},
