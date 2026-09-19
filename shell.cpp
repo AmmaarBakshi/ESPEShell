@@ -707,8 +707,7 @@ static int cmd_history(int argc, char **argv, ShellIO &io) {
   size_t n = historyCount();
   for (size_t i = 0; i < n; ++i) {
     // historyGet(0) is the newest, so walk backwards to print oldest first.
-    io.out.printf("%4u  %s
-", (unsigned)(i + 1), historyGet((int)(n - 1 - i)).c_str());
+    io.out.printf("%4u  %s\n", (unsigned)(i + 1), historyGet((int)(n - 1 - i)).c_str());
   }
   return 0;
 }

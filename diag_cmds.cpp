@@ -36,6 +36,23 @@ static const char *nvsTypeName(nvs_type_t t) {
   }
 }
 
+// Preferences reports its own type enum; the iterator reports the NVS one.
+static nvs_type_t nvsTypeOfKey(Preferences &p, const char *key) {
+  switch (p.getType(key)) {
+    case PT_I8:   return NVS_TYPE_I8;
+    case PT_U8:   return NVS_TYPE_U8;
+    case PT_I16:  return NVS_TYPE_I16;
+    case PT_U16:  return NVS_TYPE_U16;
+    case PT_I32:  return NVS_TYPE_I32;
+    case PT_U32:  return NVS_TYPE_U32;
+    case PT_I64:  return NVS_TYPE_I64;
+    case PT_U64:  return NVS_TYPE_U64;
+    case PT_STR:  return NVS_TYPE_STR;
+    case PT_BLOB: return NVS_TYPE_BLOB;
+    default:      return NVS_TYPE_ANY;
+  }
+}
+
 static void nvsPrintValue(Preferences &p, const char *key, nvs_type_t t, ShellIO &io) {
   switch (t) {
     case NVS_TYPE_STR:  io.out.println(p.getString(key, "")); break;
@@ -47,8 +64,7 @@ static void nvsPrintValue(Preferences &p, const char *key, nvs_type_t t, ShellIO
     case NVS_TYPE_I32:  io.out.println((long)p.getInt(key, 0)); break;
     case NVS_TYPE_U64:  io.out.println((unsigned long long)p.getULong64(key, 0)); break;
     case NVS_TYPE_I64:  io.out.println((long long)p.getLong64(key, 0)); break;
-    case NVS_TYPE_BLOB: io.out.printf("<blob, %u bytes>
-", (unsigned)p.getBytesLength(key)); break;
+    case NVS_TYPE_BLOB: io.out.printf("<blob, %u bytes>\n", (unsigned)p.getBytesLength(key)); break;
     default:            io.out.println(F("<unknown type>")); break;
   }
 }
@@ -74,8 +90,7 @@ static int nvsList(ShellIO &io) {
   }
   if (it) nvs_release_iterator(it);
   if (n == 0) io.out.println(F("  (empty)"));
-  io.out.printf("%d key(s), %u free entries in this partition
-", n, (unsigned)p.freeEntries());
+  io.out.printf("%d key(s), %u free entries in this partition\n", n, (unsigned)p.freeEntries());
   p.end();
   return 0;
 }
@@ -89,7 +104,7 @@ static int cmd_nvs(int argc, char **argv, ShellIO &io) {
     Preferences p;
     if (!p.begin(ESPE_PREFS_NAMESPACE, true)) { io.out.println(F("nvs: cannot open the namespace")); return 1; }
     if (!p.isKey(argv[2])) { io.out.print(argv[2]); io.out.println(F(": no such key")); p.end(); return 1; }
-    nvsPrintValue(p, argv[2], p.getType(argv[2]), io);
+    nvsPrintValue(p, argv[2], nvsTypeOfKey(p, argv[2]), io);
     p.end();
     return 0;
   }
@@ -102,8 +117,7 @@ static int cmd_nvs(int argc, char **argv, ShellIO &io) {
     size_t w = p.putString(argv[2], val);
     p.end();
     if (w == 0) { io.out.println(F("nvs: write failed")); return 1; }
-    io.out.printf("%s = %s (saved)
-", argv[2], val.c_str());
+    io.out.printf("%s = %s (saved)\n", argv[2], val.c_str());
     return 0;
   }
 
@@ -113,8 +127,7 @@ static int cmd_nvs(int argc, char **argv, ShellIO &io) {
     bool ok = p.remove(argv[2]);
     p.end();
     if (!ok) { io.out.print(argv[2]); io.out.println(F(": no such key")); return 1; }
-    io.out.printf("%s removed
-", argv[2]);
+    io.out.printf("%s removed\n", argv[2]);
     return 0;
   }
 
@@ -150,22 +163,19 @@ static int cmd_bench(int argc, char **argv, ShellIO &io) {
 
   if (doCpu) {
     io.out.println(F("CPU:"));
-    io.out.printf("  clock            %u MHz
-", (unsigned)getCpuFrequencyMhz());
+    io.out.printf("  clock            %u MHz\n", (unsigned)getCpuFrequencyMhz());
 
     volatile uint32_t acc = 0;
     unsigned long t0 = micros();
     for (uint32_t i = 0; i < 1000000UL; ++i) acc += i ^ (i >> 3);
     unsigned long us = micros() - t0;
-    io.out.printf("  1M int ops       %lu ms  (%.1f Mops/s)
-", us / 1000UL, 1000.0 / (double)us);
+    io.out.printf("  1M int ops       %lu ms  (%.1f Mops/s)\n", us / 1000UL, 1000.0 / (double)us);
 
     volatile float f = 1.0f;
     t0 = micros();
     for (uint32_t i = 1; i <= 200000UL; ++i) f = f * 1.000001f + (float)i / 3.0f;
     us = micros() - t0;
-    io.out.printf("  200k float ops   %lu ms  (%.2f Mops/s)
-", us / 1000UL, 0.2 / ((double)us / 1000000.0) / 1000.0);
+    io.out.printf("  200k float ops   %lu ms  (%.2f Mops/s)\n", us / 1000UL, 0.2 / ((double)us / 1000000.0) / 1000.0);
   }
 
   if (doFs) {
@@ -185,8 +195,7 @@ static int cmd_bench(int argc, char **argv, ShellIO &io) {
     f.flush();
     unsigned long wms = millis() - t0;
     f.close();
-    io.out.printf("  write            %u KB in %lu ms  (%.1f KB/s)
-",
+    io.out.printf("  write            %u KB in %lu ms  (%.1f KB/s)\n",
                   (unsigned)(written / 1024), wms, wms ? (written / 1024.0) * 1000.0 / wms : 0.0);
 
     f = LittleFS.open("/.bench.tmp", "r");
@@ -196,13 +205,11 @@ static int cmd_bench(int argc, char **argv, ShellIO &io) {
       while (true) { int n = f.read(buf, CHUNK); if (n <= 0) break; got += n; }
       unsigned long rms = millis() - t0;
       f.close();
-      io.out.printf("  read             %u KB in %lu ms  (%.1f KB/s)
-",
+      io.out.printf("  read             %u KB in %lu ms  (%.1f KB/s)\n",
                     (unsigned)(got / 1024), rms, rms ? (got / 1024.0) * 1000.0 / rms : 0.0);
     }
     LittleFS.remove("/.bench.tmp");
-    io.out.printf("  free space       %s
-", humanBytes(LittleFS.totalBytes() - LittleFS.usedBytes()).c_str());
+    io.out.printf("  free space       %s\n", humanBytes(LittleFS.totalBytes() - LittleFS.usedBytes()).c_str());
   }
   return 0;
 }

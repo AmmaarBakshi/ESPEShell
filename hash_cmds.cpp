@@ -178,8 +178,7 @@ static int cmd_base64(int argc, char **argv, ShellIO &io) {
   for (size_t i = 0; i < data.length(); ++i) {
     char c = data[i];
     if (c == '=' ) break;
-    if (c == '
-' || c == '' || c == ' ' || c == '	') continue;
+    if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
     int v = b64Value(c);
     if (v < 0) { io.out.println(F("base64: invalid input")); return 1; }
     acc = (acc << 6) | v;
@@ -187,8 +186,7 @@ static int cmd_base64(int argc, char **argv, ShellIO &io) {
     if (bits >= 8) { bits -= 8; out += (char)((acc >> bits) & 0xFF); }
   }
   io.out.print(out);
-  if (out.length() && out[out.length() - 1] != '
-') io.out.println();
+  if (out.length() && out[out.length() - 1] != '\n') io.out.println();
   return 0;
 }
 

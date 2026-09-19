@@ -89,8 +89,7 @@ static int cmd_dac(int argc, char **argv, ShellIO &io) {
   if (v == "off" || v == "0v") {
     dacDisable(pin);
     espeReleasePin(pin);
-    io.out.printf("DAC GPIO%d off
-", pin);
+    io.out.printf("DAC GPIO%d off\n", pin);
     return 0;
   }
 
@@ -106,8 +105,7 @@ static int cmd_dac(int argc, char **argv, ShellIO &io) {
 
   dacWrite(pin, (uint8_t)level);
   espeMarkPin(pin, PIN_DAC);
-  io.out.printf("DAC GPIO%d = %d  (~%.2f V)
-", pin, level, level * 3.3 / 255.0);
+  io.out.printf("DAC GPIO%d = %d  (~%.2f V)\n", pin, level, level * 3.3 / 255.0);
   return 0;
 #else
   io.out.println(F("dac: this chip has no DAC"));
@@ -124,15 +122,13 @@ static int cmd_tone(int argc, char **argv, ShellIO &io) {
   }
   int pin = atoi(argv[1]);
   if (!espePinUsable(pin) || espePinInputOnly(pin)) {
-    io.out.printf("tone: GPIO%d cannot drive an output
-", pin);
+    io.out.printf("tone: GPIO%d cannot drive an output\n", pin);
     return 1;
   }
   if (argc >= 3 && String(argv[2]) == "off") {
     noTone(pin);
     espeReleasePin(pin);
-    io.out.printf("tone: GPIO%d silenced
-", pin);
+    io.out.printf("tone: GPIO%d silenced\n", pin);
     return 0;
   }
   if (argc < 3) { io.out.println(F("tone: frequency required")); return 1; }
@@ -143,8 +139,7 @@ static int cmd_tone(int argc, char **argv, ShellIO &io) {
 
   espeMarkPin(pin, PIN_TONE);
   if (ms > 0) {
-    io.out.printf("GPIO%d: %ld Hz for %ld ms
-", pin, freq, ms);
+    io.out.printf("GPIO%d: %ld Hz for %ld ms\n", pin, freq, ms);
     tone(pin, (unsigned int)freq);
     bool stopped = shellWait(io, (int)ms);
     noTone(pin);
@@ -152,8 +147,7 @@ static int cmd_tone(int argc, char **argv, ShellIO &io) {
     if (stopped) io.out.println(F("tone: stopped."));
   } else {
     tone(pin, (unsigned int)freq);
-    io.out.printf("GPIO%d: %ld Hz (running - 'tone %d off' to stop)
-", pin, freq, pin);
+    io.out.printf("GPIO%d: %ld Hz (running - 'tone %d off' to stop)\n", pin, freq, pin);
   }
   return 0;
 }
@@ -194,8 +188,7 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
   }
   int pin = atoi(argv[1]);
   if (!espePinUsable(pin) || espePinInputOnly(pin)) {
-    io.out.printf("servo: GPIO%d cannot drive an output
-", pin);
+    io.out.printf("servo: GPIO%d cannot drive an output\n", pin);
     return 1;
   }
 
@@ -208,8 +201,7 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
     s_servoChan[pin] = -1;
 #endif
     espeReleasePin(pin);
-    io.out.printf("servo: GPIO%d released
-", pin);
+    io.out.printf("servo: GPIO%d released\n", pin);
     return 0;
   }
 
@@ -217,8 +209,7 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
   if (v.endsWith("us")) {
     pulseUs = v.substring(0, v.length() - 2).toInt();
     if (pulseUs < SERVO_MIN_US || pulseUs > SERVO_MAX_US) {
-      io.out.printf("servo: pulse must be %d-%d us
-", SERVO_MIN_US, SERVO_MAX_US);
+      io.out.printf("servo: pulse must be %d-%d us\n", SERVO_MIN_US, SERVO_MAX_US);
       return 1;
     }
   } else {
@@ -232,8 +223,7 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
 
 #if ESPE_LEDC_NEW_API
   if (!ledcAttach(pin, SERVO_FREQ_HZ, SERVO_BITS)) {
-    io.out.printf("servo: could not attach GPIO%d
-", pin);
+    io.out.printf("servo: could not attach GPIO%d\n", pin);
     return 1;
   }
   ledcWrite(pin, duty);
@@ -250,8 +240,7 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
 #endif
 
   espeMarkPin(pin, PIN_SERVO);
-  io.out.printf("servo GPIO%d: %ld us  (~%ld deg)
-", pin, pulseUs,
+  io.out.printf("servo GPIO%d: %ld us  (~%ld deg)\n", pin, pulseUs,
                 (pulseUs - SERVO_MIN_US) * 180 / (SERVO_MAX_US - SERVO_MIN_US));
   return 0;
 }
@@ -271,8 +260,7 @@ static int cmd_touchpin(int argc, char **argv, ShellIO &io) {
     return 1;
   }
   int pin = atoi(argv[1]);
-  if (!isTouchPin(pin)) { io.out.printf("touchpin: GPIO%d is not a touch pin
-", pin); return 1; }
+  if (!isTouchPin(pin)) { io.out.printf("touchpin: GPIO%d is not a touch pin\n", pin); return 1; }
 
   int samples = 1;
   if (argc >= 4 && String(argv[2]) == "-n") samples = atoi(argv[3]);
@@ -306,8 +294,7 @@ static int cmd_pinwatch(int argc, char **argv, ShellIO &io) {
     return 1;
   }
   int pin = atoi(argv[1]);
-  if (!espePinUsable(pin)) { io.out.printf("pinwatch: GPIO%d is not usable
-", pin); return 1; }
+  if (!espePinUsable(pin)) { io.out.printf("pinwatch: GPIO%d is not usable\n", pin); return 1; }
 
   int mode = PIN_INPUT;
   long limitSecs = 0;                       // 0 = until Ctrl-C
@@ -325,23 +312,20 @@ static int cmd_pinwatch(int argc, char **argv, ShellIO &io) {
   int last = digitalRead(pin);
   unsigned long start = millis();
   unsigned long edges = 0;
-  io.out.printf("watching GPIO%d (now %d) - Ctrl-C to stop
-", pin, last);
+  io.out.printf("watching GPIO%d (now %d) - Ctrl-C to stop\n", pin, last);
 
   for (;;) {
     if (shellWait(io, 2)) break;            // polls at ~500 Hz, Ctrl-C-able
     int v = digitalRead(pin);
     if (v != last) {
       edges++;
-      io.out.printf("  %8lu ms  GPIO%d %d -> %d  (%s)
-", millis() - start, pin, last, v,
+      io.out.printf("  %8lu ms  GPIO%d %d -> %d  (%s)\n", millis() - start, pin, last, v,
                     v ? "rising" : "falling");
       last = v;
     }
     if (limitSecs > 0 && (millis() - start) >= (unsigned long)limitSecs * 1000UL) break;
   }
-  io.out.printf("pinwatch: %lu edge(s) in %lu ms
-", edges, millis() - start);
+  io.out.printf("pinwatch: %lu edge(s) in %lu ms\n", edges, millis() - start);
   return 0;
 }
 

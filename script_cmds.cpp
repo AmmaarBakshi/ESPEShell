@@ -195,14 +195,10 @@ static int cmd_time(int argc, char **argv, ShellIO &io) {
   unsigned long us = micros() - t0;
   uint32_t heapAfter = ESP.getFreeHeap();
 
-  io.out.printf("
-real  %lu.%03lu s  (%lu us)
-", us / 1000000UL, (us / 1000UL) % 1000UL, us);
-  io.out.printf("heap  %ld bytes %s
-", (long)heapBefore - (long)heapAfter,
+  io.out.printf("\nreal  %lu.%03lu s  (%lu us)\n", us / 1000000UL, (us / 1000UL) % 1000UL, us);
+  io.out.printf("heap  %ld bytes %s\n", (long)heapBefore - (long)heapAfter,
                 (heapAfter <= heapBefore) ? "used" : "freed");
-  io.out.printf("exit  %d
-", rc);
+  io.out.printf("exit  %d\n", rc);
   return rc;
 }
 
