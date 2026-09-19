@@ -189,7 +189,7 @@ static int cmd_pwm(int argc, char **argv, ShellIO &io) {
       ledcDetachPin(p);
 #endif
       g_pwmSet[p] = false;
-      g_pinSet[p] = false;   // no longer claimed (keeps `pin --used` honest)
+      espeReleasePin(p);   // no longer claimed (keeps `pin --used` honest)
     }
     io.out.printf("GPIO%d: PWM off\n", p);
     return 0;
@@ -304,8 +304,7 @@ static int cmd_led(int argc, char **argv, ShellIO &io) {
   if (!g_ledInit) {
     pinMode(ESPE_ONBOARD_LED_PIN, OUTPUT);
     g_ledInit = true;
-    g_pinSet[ESPE_ONBOARD_LED_PIN] = true;   // show up in `pin --used`
-    g_pinMode[ESPE_ONBOARD_LED_PIN] = 1;
+    espeMarkPin(ESPE_ONBOARD_LED_PIN, PIN_OUTPUT);   // show up in `pin --used`
   }
   String a = argc >= 2 ? String(argv[1]) : String("status");
   if (a == "on") g_ledOn = true;
