@@ -18,16 +18,44 @@
 // ============================================================================
 
 // ---- GPIO tracking ---------------------------------------------------------
+// One registry for every command that grabs a pin (pin, pwm, led, blink, and
+// the peripheral commands in gpio_cmds.cpp) so `pin --used` / `--free` always
+// tell the truth about what the shell has claimed.
 static bool   g_pinSet[40];    // has the user configured this pin via ESPEShell?
-static int8_t g_pinMode[40];   // 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP
+static int8_t g_pinMode[40];   // see PIN_* in shell.h
+
+bool espePinUsable(int p) { return p >= 0 && p <= 39 && !(p >= 6 && p <= 11); }
+bool espePinInputOnly(int p) { return p >= 34 && p <= 39; }     // classic ESP32
+
+void espeMarkPin(int p, int mode) {
+  if (p < 0 || p > 39) return;
+  g_pinSet[p] = true;
+  g_pinMode[p] = (int8_t)mode;
+}
+
+void espeReleasePin(int p) {
+  if (p < 0 || p > 39) return;
+  g_pinSet[p] = false;
+  g_pinMode[p] = 0;
+}
 
 static bool isFlash(int p) { return p >= 6 && p <= 11; }       // SPI flash pins
-static bool inputOnly(int p) { return p >= 34 && p <= 39; }     // classic ESP32
-static bool usablePin(int p) { return p >= 0 && p <= 39 && !isFlash(p); }
+static bool inputOnly(int p) { return espePinInputOnly(p); }
+static bool usablePin(int p) { return espePinUsable(p); }
 
 static const char *modeName(int p) {
   if (!g_pinSet[p]) return "-";
-  switch (g_pinMode[p]) { case 0: return "INPUT"; case 1: return "OUTPUT"; case 2: return "PULLUP"; case 3: return "PWM"; }
+  switch (g_pinMode[p]) {
+    case PIN_INPUT:  return "INPUT";
+    case PIN_OUTPUT: return "OUTPUT";
+    case PIN_PULLUP: return "PULLUP";
+    case PIN_PWM:    return "PWM";
+    case PIN_ADC:    return "ADC";
+    case PIN_DAC:    return "DAC";
+    case PIN_TOUCH:  return "TOUCH";
+    case PIN_TONE:   return "TONE";
+    case PIN_SERVO:  return "SERVO";
+  }
   return "?";
 }
 
@@ -65,7 +93,7 @@ static int applyMode(int p, const String &m, ShellIO &io) {
   else if (m == "up" || m == "pullup") md = 2;
   else { io.out.println(F("pin: mode is in|out|up")); return 1; }
   pinMode(p, md == 0 ? INPUT : md == 1 ? OUTPUT : INPUT_PULLUP);
-  g_pinSet[p] = true; g_pinMode[p] = md;
+  espeMarkPin(p, md);
   io.out.printf("GPIO%d -> %s\n", p, modeName(p));
   return 0;
 }
@@ -104,7 +132,7 @@ static int cmd_pin(int argc, char **argv, ShellIO &io) {
   if (a1 == "write" && argc >= 4) {
     int p = atoi(argv[2]); int v = atoi(argv[3]) ? HIGH : LOW;
     if (!usablePin(p) || inputOnly(p)) { io.out.printf("pin: GPIO%d cannot be an output\n", p); return 1; }
-    pinMode(p, OUTPUT); g_pinSet[p] = true; g_pinMode[p] = 1;
+    pinMode(p, OUTPUT); espeMarkPin(p, PIN_OUTPUT);
     digitalWrite(p, v);
     io.out.printf("GPIO%d <- %d\n", p, v ? 1 : 0);
     return 0;
@@ -184,7 +212,7 @@ static int cmd_pwm(int argc, char **argv, ShellIO &io) {
     g_pwmChan[p] = ch;
 #endif
     g_pwmSet[p] = true;
-    g_pinSet[p] = true; g_pinMode[p] = 3;   // show up in `pin --used` as PWM
+    espeMarkPin(p, PIN_PWM);   // show up in `pin --used` as PWM
   } else if (argc >= 4) {
 #if ESPE_LEDC_NEW_API
     ledcChangeFrequency(p, freq, 8);
@@ -316,8 +344,7 @@ static int cmd_blink(int argc, char **argv, ShellIO &io) {
   const int pin = ESPE_ONBOARD_LED_PIN;
   pinMode(pin, OUTPUT);
   g_ledInit = true;
-  g_pinSet[pin] = true;
-  g_pinMode[pin] = 1;
+  espeMarkPin(pin, PIN_OUTPUT);
 
   int halfMs = 500 / rate;             // on for half a period, off for half
   long blinks = (long)secs * rate;

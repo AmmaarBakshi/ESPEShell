@@ -149,6 +149,14 @@ String timeNowString();      // local "YYYY-MM-DD HH:MM:SS", or a "not set" note
 void   timeStartSync(const char *server);
 void   timeInitAtBoot();     // called once from setup() after WiFi comes up
 
+// ---- GPIO registry (esp_cmds.cpp) - shared by every pin-using command ------
+enum { PIN_INPUT = 0, PIN_OUTPUT, PIN_PULLUP, PIN_PWM, PIN_ADC, PIN_DAC,
+       PIN_TOUCH, PIN_TONE, PIN_SERVO };
+bool espePinUsable(int pin);       // false for the SPI-flash pins (6..11)
+bool espePinInputOnly(int pin);    // GPIO34..39 have no output driver
+void espeMarkPin(int pin, int mode);     // record a claim, shown by `pin --used`
+void espeReleasePin(int pin);            // drop the claim again
+
 // ---- Boot counter (esp_cmds.cpp) - persisted in NVS, used by `dmesg` -------
 // Increments once per boot (cached after the first call); call once from
 // setup() so the count is correct even if `dmesg` is never run.
