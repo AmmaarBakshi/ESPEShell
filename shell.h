@@ -80,6 +80,7 @@ extern const Command SCRIPT_CMDS[];  extern const size_t SCRIPT_CMDS_N;
 extern const Command TIME_CMDS[];    extern const size_t TIME_CMDS_N;
 extern const Command HASH_CMDS[];    extern const size_t HASH_CMDS_N;
 extern const Command GPIO_CMDS[];    extern const size_t GPIO_CMDS_N;
+extern const Command DIAG_CMDS[];    extern const size_t DIAG_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
