@@ -138,7 +138,77 @@ static int cmd_nvs(int argc, char **argv, ShellIO &io) {
   return 1;
 }
 
+// ---- bench : quick CPU and filesystem benchmark ----------------------------
+static int cmd_bench(int argc, char **argv, ShellIO &io) {
+  bool doCpu = true, doFs = true;
+  if (argc >= 2) {
+    String a = argv[1];
+    if (a == "cpu") doFs = false;
+    else if (a == "fs") doCpu = false;
+    else { io.out.println(F("usage: bench [cpu|fs]")); return 1; }
+  }
+
+  if (doCpu) {
+    io.out.println(F("CPU:"));
+    io.out.printf("  clock            %u MHz
+", (unsigned)getCpuFrequencyMhz());
+
+    volatile uint32_t acc = 0;
+    unsigned long t0 = micros();
+    for (uint32_t i = 0; i < 1000000UL; ++i) acc += i ^ (i >> 3);
+    unsigned long us = micros() - t0;
+    io.out.printf("  1M int ops       %lu ms  (%.1f Mops/s)
+", us / 1000UL, 1000.0 / (double)us);
+
+    volatile float f = 1.0f;
+    t0 = micros();
+    for (uint32_t i = 1; i <= 200000UL; ++i) f = f * 1.000001f + (float)i / 3.0f;
+    us = micros() - t0;
+    io.out.printf("  200k float ops   %lu ms  (%.2f Mops/s)
+", us / 1000UL, 0.2 / ((double)us / 1000000.0) / 1000.0);
+  }
+
+  if (doFs) {
+    io.out.println(F("LittleFS (32 KB temp file):"));
+    const size_t CHUNK = 512, TOTAL = 32768;
+    uint8_t buf[CHUNK];
+    for (size_t i = 0; i < CHUNK; ++i) buf[i] = (uint8_t)i;
+
+    File f = LittleFS.open("/.bench.tmp", "w");
+    if (!f) { io.out.println(F("  write: cannot create /.bench.tmp")); return 1; }
+    unsigned long t0 = millis();
+    size_t written = 0;
+    while (written < TOTAL) {
+      if (f.write(buf, CHUNK) != CHUNK) break;
+      written += CHUNK;
+    }
+    f.flush();
+    unsigned long wms = millis() - t0;
+    f.close();
+    io.out.printf("  write            %u KB in %lu ms  (%.1f KB/s)
+",
+                  (unsigned)(written / 1024), wms, wms ? (written / 1024.0) * 1000.0 / wms : 0.0);
+
+    f = LittleFS.open("/.bench.tmp", "r");
+    if (f) {
+      t0 = millis();
+      size_t got = 0;
+      while (true) { int n = f.read(buf, CHUNK); if (n <= 0) break; got += n; }
+      unsigned long rms = millis() - t0;
+      f.close();
+      io.out.printf("  read             %u KB in %lu ms  (%.1f KB/s)
+",
+                    (unsigned)(got / 1024), rms, rms ? (got / 1024.0) * 1000.0 / rms : 0.0);
+    }
+    LittleFS.remove("/.bench.tmp");
+    io.out.printf("  free space       %s
+", humanBytes(LittleFS.totalBytes() - LittleFS.usedBytes()).c_str());
+  }
+  return 0;
+}
+
 const Command DIAG_CMDS[] = {
+  {"bench", cmd_bench, "bench [cpu|fs]",             "quick CPU / filesystem benchmark", G_ESP},
   {"nvs",  cmd_nvs,  "nvs [list|get|set|rm|clear]", "browse persistent settings (NVS)", G_ESP},
   {"temp", cmd_temp, "temp", "internal die temperature", G_ESP},
 };
