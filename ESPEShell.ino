@@ -317,10 +317,35 @@ static void drainMqtt() {
   }
 }
 
+// Runs whatever `every` jobs have come round. The command runs once, with its
+// output captured, and the same text is echoed to Serial and to the live
+// Telnet session - then each in-progress prompt is redrawn, as with MQTT.
+static void drainCron() {
+  String job;
+  while (cronPopDue(job)) {
+    String out = runCapture(job);
+
+    CountingPrint scp(Serial);
+    scp.println();
+    scp.print(F("[every] ")); scp.println(job);
+    scp.print(out);
+    redrawLine(scp, serSt.line);
+
+    if (telnetClient && telnetClient.connected() && tnState == T_SHELL) {
+      CountingPrint tcp(telnetClient);
+      tcp.println();
+      tcp.print(F("[every] ")); tcp.println(job);
+      tcp.print(out);
+      redrawLine(tcp, tnSt.line);
+    }
+  }
+}
+
 void loop() {
   handleTelnet();
   handleSerial();
   httpdPoll();     // no-op unless `httpd start` has run
+  drainCron();
   drainMqtt();
   delay(1);
 }

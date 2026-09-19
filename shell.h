@@ -82,6 +82,7 @@ extern const Command HASH_CMDS[];    extern const size_t HASH_CMDS_N;
 extern const Command GPIO_CMDS[];    extern const size_t GPIO_CMDS_N;
 extern const Command DIAG_CMDS[];    extern const size_t DIAG_CMDS_N;
 extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
+extern const Command CRON_CMDS[];    extern const size_t CRON_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -168,6 +169,10 @@ uint32_t espeBootCount();
 // ---- HTTP file server (httpd_cmds.cpp) - only active after `httpd start` ---
 void httpdPoll();        // call once per main loop() iteration
 bool httpdRunning();
+
+// ---- Background jobs (cron_cmds.cpp) - the `every` command ----------------
+bool   cronPopDue(String &line);   // next due job line, false if nothing is due
+size_t cronJobCount();
 
 // ---- MQTT (mqtt_cmds.cpp) - optional, needs the PubSubClient library -------
 void   mqttPoll();          // call once per main loop() iteration
