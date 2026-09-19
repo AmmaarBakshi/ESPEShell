@@ -2,6 +2,17 @@
 #include "config.h"
 #include <WiFi.h>
 #include "soc/soc_caps.h"
+#if __has_include("esp_arduino_version.h")
+#include "esp_arduino_version.h"
+#endif
+
+// The LEDC API is pin-based on core 3.x and channel-based on 2.x (same split
+// as `pwm` in esp_cmds.cpp).
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+#define ESPE_LEDC_NEW_API 1
+#else
+#define ESPE_LEDC_NEW_API 0
+#endif
 
 // ============================================================================
 //  Peripheral commands: the analog and signal-generating side of the GPIOs
@@ -160,7 +171,93 @@ static int cmd_beep(int argc, char **argv, ShellIO &io) {
   return cmd_tone(4, fake, io);
 }
 
+// ---- servo : hobby servo on any output pin (50 Hz, 0.5-2.5 ms pulse) ------
+// Driven straight off LEDC at 16-bit resolution, so no servo library is
+// needed: one 20 ms frame is 65536 counts, and the pulse width is a fraction
+// of that.
+#define SERVO_FREQ_HZ   50
+#define SERVO_BITS      16
+#define SERVO_MIN_US    500      // ~0 degrees
+#define SERVO_MAX_US    2500     // ~180 degrees
+
+static int8_t s_servoChan[40];   // core 2.x only: LEDC channel per pin, -1 = none
+static bool   s_servoInit = false;
+
+static int cmd_servo(int argc, char **argv, ShellIO &io) {
+  if (!s_servoInit) { for (int i = 0; i < 40; ++i) s_servoChan[i] = -1; s_servoInit = true; }
+
+  if (argc < 3) {
+    io.out.println(F("usage: servo <pin> <0-180 | 500-2500us | off>"));
+    io.out.println(F("       servo 18 90     -> centre"));
+    io.out.println(F("       servo 18 1500us -> the same, by pulse width"));
+    return 1;
+  }
+  int pin = atoi(argv[1]);
+  if (!espePinUsable(pin) || espePinInputOnly(pin)) {
+    io.out.printf("servo: GPIO%d cannot drive an output
+", pin);
+    return 1;
+  }
+
+  String v = argv[2];
+  if (v == "off" || v == "detach") {
+#if ESPE_LEDC_NEW_API
+    ledcDetach(pin);
+#else
+    ledcDetachPin(pin);
+    s_servoChan[pin] = -1;
+#endif
+    espeReleasePin(pin);
+    io.out.printf("servo: GPIO%d released
+", pin);
+    return 0;
+  }
+
+  long pulseUs;
+  if (v.endsWith("us")) {
+    pulseUs = v.substring(0, v.length() - 2).toInt();
+    if (pulseUs < SERVO_MIN_US || pulseUs > SERVO_MAX_US) {
+      io.out.printf("servo: pulse must be %d-%d us
+", SERVO_MIN_US, SERVO_MAX_US);
+      return 1;
+    }
+  } else {
+    long angle = v.toInt();
+    if (angle < 0 || angle > 180) { io.out.println(F("servo: angle must be 0 - 180")); return 1; }
+    pulseUs = SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US)) / 180;
+  }
+
+  // duty = pulse / frame, where one frame (20 ms at 50 Hz) is 2^bits counts.
+  uint32_t duty = (uint32_t)(((uint64_t)pulseUs << SERVO_BITS) / (1000000UL / SERVO_FREQ_HZ));
+
+#if ESPE_LEDC_NEW_API
+  if (!ledcAttach(pin, SERVO_FREQ_HZ, SERVO_BITS)) {
+    io.out.printf("servo: could not attach GPIO%d
+", pin);
+    return 1;
+  }
+  ledcWrite(pin, duty);
+#else
+  if (s_servoChan[pin] < 0) {
+    // Servos live high in the channel range so they don't fight `pwm`.
+    static int nextChan = 12;
+    if (nextChan > 15) { io.out.println(F("servo: no free LEDC channel")); return 1; }
+    s_servoChan[pin] = nextChan++;
+    ledcSetup(s_servoChan[pin], SERVO_FREQ_HZ, SERVO_BITS);
+    ledcAttachPin(pin, s_servoChan[pin]);
+  }
+  ledcWrite(s_servoChan[pin], duty);
+#endif
+
+  espeMarkPin(pin, PIN_SERVO);
+  io.out.printf("servo GPIO%d: %ld us  (~%ld deg)
+", pin, pulseUs,
+                (pulseUs - SERVO_MIN_US) * 180 / (SERVO_MAX_US - SERVO_MIN_US));
+  return 0;
+}
+
 const Command GPIO_CMDS[] = {
+  {"servo", cmd_servo, "servo <pin> <0-180|off>",  "drive a hobby servo (50 Hz PWM)",   G_ESP},
   {"tone", cmd_tone, "tone <pin> <hz> [ms]|off", "square-wave tone on a pin",         G_ESP},
   {"beep", cmd_beep, "beep [pin] [ms]",          "short 1 kHz beep (default GPIO13)", G_ESP},
   {"dac", cmd_dac, "dac <25|26> <0-255|off>",  "analog output voltage (8-bit DAC)", G_ESP},
