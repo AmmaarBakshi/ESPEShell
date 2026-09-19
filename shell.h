@@ -177,5 +177,6 @@ String mqttPopPending();    // pops the oldest pending message, formatted "topic
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);
 int  runLine(const String &line, Print &realOut, Stream *rawIn = nullptr);   // pipes + redirection
+String runCapture(const String &line);   // run with the output captured, not printed
 void printPrompt(Print &out);
 void printBanner(Print &out);

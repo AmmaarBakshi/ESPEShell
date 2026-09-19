@@ -584,6 +584,15 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
   return rc;
 }
 
+// Runs a line with its output captured instead of printed. Used when the same
+// output has to reach more than one place (see the `every` jobs drained in
+// ESPEShell.ino, which print to Serial and to the live Telnet session).
+String runCapture(const String &line) {
+  StringPrint buf;
+  runLine(line, buf);
+  return buf.s;
+}
+
 // ============================================================================
 //  Prompt & banner
 // ============================================================================
