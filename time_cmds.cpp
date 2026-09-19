@@ -127,7 +127,9 @@ static int cmd_date(int argc, char **argv, ShellIO &io) {
       tmv.tm_year = y - 1900; tmv.tm_mon = mo - 1; tmv.tm_mday = d;
       tmv.tm_hour = h; tmv.tm_min = mi; tmv.tm_sec = se;
       time_t local = mktime(&tmv);                      // mktime here treats the fields as UTC
-      struct timeval tv = { .tv_sec = local - tzOffset(), .tv_usec = 0 };
+      struct timeval tv;
+      tv.tv_sec  = local - tzOffset();
+      tv.tv_usec = 0;
       settimeofday(&tv, nullptr);
       io.out.print(F("clock set: ")); io.out.println(timeNowString());
       return 0;

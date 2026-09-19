@@ -277,6 +277,8 @@ void setup() {
       Serial.println(F("[mdns] failed to start (telnet still works via the printed IP)"));
     }
   }
+  timeInitAtBoot();   // kicks off a background SNTP sync (no-op without WiFi)
+
   telnetServer.begin();
   telnetServer.setNoDelay(true);
 
