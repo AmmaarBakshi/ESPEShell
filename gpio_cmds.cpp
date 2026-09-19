@@ -299,7 +299,54 @@ static int cmd_touchpin(int argc, char **argv, ShellIO &io) {
 #endif
 }
 
+// ---- pinwatch : print a digital pin's edges as they happen -----------------
+static int cmd_pinwatch(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    io.out.println(F("usage: pinwatch <pin> [-up|-down] [-t secs]   (Ctrl-C to stop)"));
+    return 1;
+  }
+  int pin = atoi(argv[1]);
+  if (!espePinUsable(pin)) { io.out.printf("pinwatch: GPIO%d is not usable
+", pin); return 1; }
+
+  int mode = PIN_INPUT;
+  long limitSecs = 0;                       // 0 = until Ctrl-C
+  for (int i = 2; i < argc; ++i) {
+    String a = argv[i];
+    if (a == "-up" || a == "--pullup") mode = PIN_PULLUP;
+    else if (a == "-down" || a == "--pulldown") mode = -1;
+    else if (a == "-t" && i + 1 < argc) limitSecs = String(argv[++i]).toInt();
+    else { io.out.print(F("pinwatch: unknown option ")); io.out.println(a); return 1; }
+  }
+
+  pinMode(pin, mode == PIN_PULLUP ? INPUT_PULLUP : (mode == -1 ? INPUT_PULLDOWN : INPUT));
+  espeMarkPin(pin, mode == PIN_PULLUP ? PIN_PULLUP : PIN_INPUT);
+
+  int last = digitalRead(pin);
+  unsigned long start = millis();
+  unsigned long edges = 0;
+  io.out.printf("watching GPIO%d (now %d) - Ctrl-C to stop
+", pin, last);
+
+  for (;;) {
+    if (shellWait(io, 2)) break;            // polls at ~500 Hz, Ctrl-C-able
+    int v = digitalRead(pin);
+    if (v != last) {
+      edges++;
+      io.out.printf("  %8lu ms  GPIO%d %d -> %d  (%s)
+", millis() - start, pin, last, v,
+                    v ? "rising" : "falling");
+      last = v;
+    }
+    if (limitSecs > 0 && (millis() - start) >= (unsigned long)limitSecs * 1000UL) break;
+  }
+  io.out.printf("pinwatch: %lu edge(s) in %lu ms
+", edges, millis() - start);
+  return 0;
+}
+
 const Command GPIO_CMDS[] = {
+  {"pinwatch", cmd_pinwatch, "pinwatch <pin> [-up] [-t s]", "log a pin's edges live",  G_ESP},
   {"touchpin", cmd_touchpin, "touchpin <pin> [-n N]", "capacitive touch reading",     G_ESP},
   {"servo", cmd_servo, "servo <pin> <0-180|off>",  "drive a hobby servo (50 Hz PWM)",   G_ESP},
   {"tone", cmd_tone, "tone <pin> <hz> [ms]|off", "square-wave tone on a pin",         G_ESP},
