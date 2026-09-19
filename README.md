@@ -249,13 +249,17 @@ Highlights:
   basename dirname realpath`
 - **Text:** `cat head tail wc sort uniq cut paste tr tee nl fold fmt od xxd
   strings diff cmp`
-- **Search / scripting:** `grep rg find locate sed awk xargs which type command`
-- **Shell built-ins:** `help man clear sh exit`
-- **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep`
-- **Networking:** `ip wifi mqtt ping curl wget dig nslookup ss`
-- **File transfer:** `send recv`
-- **ESP32:** `tsw pin pwm led blink sleep deepsleep restart ota dmesg data chip heap
-  i2cscan wifiscan`
+- **Text digests:** `md5sum sha256sum crc32 base64 rand uuid`
+- **Search / scripting:** `grep rg find locate sed awk xargs which type command
+  watch repeat time seq yes true false test [ expr`
+- **Shell built-ins:** `help man clear sh exit alias unalias history`
+- **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep
+  date ntp cal every`
+- **Networking:** `ip wifi ap httpd mqtt ping curl wget dig nslookup ss`
+- **File transfer:** `send recv` (and `httpd` for a browser)
+- **ESP32:** `tsw pin pinout pinwatch pwm adc dac tone beep servo touchpin led blink
+  sleep deepsleep restart ota dmesg data chip heap temp cpufreq bench nvs
+  neofetch i2cscan i2c wifiscan`
 
 ### ESP-specific
 
@@ -278,6 +282,49 @@ Highlights:
 | `data`                         | live snapshot: heap, RSSI, uptime, bytes in/out, tasks   |
 | `restart` / `reboot`           | reboot the ESP32                                         |
 | `chip` / `heap`                | chip info / heap summary                                 |
+| `pinout`                       | DevKit V1 pin map with strapping / ADC warnings          |
+| `pinwatch <n> [-up] [-t s]`    | log a pin's edges live until Ctrl-C                      |
+| `adc <n> [-n N] [-d ms]`       | analog read: raw + millivolts, averaged over N samples   |
+| `dac <25\|26> <0-255\|1.8v\|off>` | true analog output on the two DAC pins              |
+| `tone <n> <hz> [ms]` / `beep`  | square wave for a piezo; `tone <n> off` stops it         |
+| `servo <n> <0-180\|1500us\|off>` | hobby servo straight off LEDC, no library             |
+| `touchpin <n> [-n N]`          | capacitive touch reading                                 |
+| `i2c get\|set\|dump <addr> ...` | read / write a device's registers after `i2cscan`      |
+| `temp`                         | internal die temperature (trend, not a thermometer)      |
+| `cpufreq [mhz]`                | show / set CPU clock (240..10 MHz; <80 stops the radio)  |
+| `bench [cpu\|fs]`              | quick CPU and LittleFS throughput benchmark              |
+| `nvs [list\|get\|set\|rm\|clear]` | browse the settings the shell persists in NVS       |
+| `neofetch` / `sysinfo`         | the whole board on one screen                            |
+| `mkfs --force`                 | reformat LittleFS (erases everything)                    |
+
+### Shell, time and background work
+
+| Command                        | What it does                                             |
+| ------------------------------ | -------------------------------------------------------- |
+| `alias ll='ls -l'` / `unalias` | command aliases (RAM; put them in `/boot.sh` to persist) |
+| `history [-c]`                 | list or clear the command history                        |
+| `watch [-n secs] [-t] <cmd>`   | re-run a command on screen until Ctrl-C                  |
+| `repeat N [-d ms] <cmd>`       | run a command N times                                    |
+| `every <secs> <cmd>`           | run it in the background; `--list`, `--del N`, `--clear` |
+| `time <cmd>`                   | how long a command took, plus its heap delta             |
+| `seq` / `yes` / `true` / `false` | the small scripting primitives (all bounded)           |
+| `test EXPR` / `[ EXPR ]` / `expr` | conditions and integer arithmetic for `sh` scripts    |
+| `date [-u] [+FMT]` / `date -s` | wall clock, once `ntp` (or `-s`) has set it              |
+| `ntp [sync [srv]\|tz H\|status]` | SNTP sync; the timezone offset is saved in NVS        |
+| `cal [[month] year]`           | month calendar                                           |
+| `md5sum` / `sha256sum` / `crc32` | digests of files or piped text                         |
+| `base64 [-d]`                  | encode / decode                                          |
+| `rand [-n N] [lo] hi` / `uuid` | hardware RNG values and v4 UUIDs                         |
+| `ap start [ssid] [pass]`       | run the board as its own access point                    |
+| `httpd start [port]`           | browse / download / upload LittleFS from a browser       |
+
+The clock starts a background SNTP sync at boot, so `date` usually works a few
+seconds after a WiFi-connected reset; set your zone once with `ntp tz 5.5` and
+it is remembered across reboots.
+
+`every` jobs run from the main loop with their output captured and echoed to
+every live session, so a job started over Telnet keeps reporting on Serial too.
+Commands that never return (`watch`, another `every`) are refused.
 
 ## 11. Honest limitations
 
@@ -308,6 +355,16 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
   radio pausing.
 - `mqtt` is plain MQTT only (no TLS/8883) and does not auto-reconnect after a
   drop - run `mqtt connect` again. See section 9.
+- `date` has no battery-backed RTC behind it: the clock is 1970 until `ntp`
+  syncs it (or `date -s` sets it), and it resets on every reboot.
+- `adc` on ADC2 pins (0, 2, 4, 12-15, 25-27) is unreliable while WiFi is
+  connected - the radio owns that converter. ADC1 (32-39) is always fine.
+- `temp` reads the undocumented on-die sensor: it runs well above ambient, so
+  use it as a trend, not a thermometer.
+- `httpd` serves the whole filesystem to anyone on the network with no
+  password - start it when you need it, `httpd stop` when you don't.
+- `every` jobs are RAM-only and run from the main loop, so they are paced by it
+  and disappear on reboot (re-add them from `/boot.sh`).
 
 ## 12. Project layout
 
@@ -325,7 +382,14 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
 | `xfer_cmds.cpp`   | `send` / `recv` base64 file transfer                     |
 | `mqtt_cmds.cpp`   | `mqtt` pub/sub (needs the PubSubClient library)          |
 | `misc_cmds.cpp`   | archive / package-manager stubs                          |
-| `esp_cmds.cpp`    | ESP32-specific commands (GPIO, PWM, sleep, OTA, dmesg, ...) |
+| `esp_cmds.cpp`    | ESP32-specific commands (GPIO, PWM, sleep, OTA, dmesg, i2c, ...) |
+| `gpio_cmds.cpp`   | analog / signal pins: `adc dac tone beep servo touchpin pinwatch pinout` |
+| `diag_cmds.cpp`   | `temp cpufreq bench nvs mkfs neofetch`                   |
+| `time_cmds.cpp`   | `date ntp cal` - SNTP clock, timezone saved in NVS       |
+| `hash_cmds.cpp`   | `md5sum sha256sum crc32 base64 rand uuid`                |
+| `script_cmds.cpp` | `watch repeat time seq yes true false test expr`         |
+| `cron_cmds.cpp`   | `every` - repeating background jobs                      |
+| `httpd_cmds.cpp`  | `httpd` - LittleFS web browser / uploader                |
 
 New commands are added by writing a handler and appending it to that module's
 `Command[]` table — the `help` listing updates automatically.
