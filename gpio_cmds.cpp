@@ -256,7 +256,51 @@ static int cmd_servo(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- touchpin : capacitive touch read --------------------------------------
+// Named `touchpin` rather than `touch` because `touch` already creates files.
+static bool isTouchPin(int p) {
+  return p == 0 || p == 2 || p == 4 || (p >= 12 && p <= 15) || p == 27 || p == 32 || p == 33;
+}
+
+static int cmd_touchpin(int argc, char **argv, ShellIO &io) {
+#if SOC_TOUCH_SENSOR_SUPPORTED
+  if (argc < 2) {
+    io.out.println(F("usage: touchpin <pin> [-n samples]"));
+    io.out.print(F("       touch-capable pins: 0 2 4 12 13 14 15 27 32 33"));
+    io.out.println();
+    return 1;
+  }
+  int pin = atoi(argv[1]);
+  if (!isTouchPin(pin)) { io.out.printf("touchpin: GPIO%d is not a touch pin
+", pin); return 1; }
+
+  int samples = 1;
+  if (argc >= 4 && String(argv[2]) == "-n") samples = atoi(argv[3]);
+  if (samples < 1) samples = 1;
+  if (samples > 100) samples = 100;
+
+  espeMarkPin(pin, PIN_TOUCH);
+  uint32_t sum = 0, lo = 0xFFFFFFFFu, hi = 0;
+  for (int i = 0; i < samples; ++i) {
+    uint32_t v = (uint32_t)touchRead(pin);
+    sum += v;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  uint32_t avg = sum / samples;
+  io.out.printf("touch GPIO%d = %lu", pin, (unsigned long)avg);
+  if (samples > 1) io.out.printf("  (min %lu, max %lu, n=%d)", (unsigned long)lo, (unsigned long)hi, samples);
+  io.out.println();
+  io.out.println(F("(a finger moves the reading a long way - compare touched vs untouched)"));
+  return 0;
+#else
+  io.out.println(F("touchpin: this chip has no touch sensor"));
+  return 1;
+#endif
+}
+
 const Command GPIO_CMDS[] = {
+  {"touchpin", cmd_touchpin, "touchpin <pin> [-n N]", "capacitive touch reading",     G_ESP},
   {"servo", cmd_servo, "servo <pin> <0-180|off>",  "drive a hobby servo (50 Hz PWM)",   G_ESP},
   {"tone", cmd_tone, "tone <pin> <hz> [ms]|off", "square-wave tone on a pin",         G_ESP},
   {"beep", cmd_beep, "beep [pin] [ms]",          "short 1 kHz beep (default GPIO13)", G_ESP},
