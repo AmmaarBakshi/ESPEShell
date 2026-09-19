@@ -373,7 +373,59 @@ static int cmd_printf(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- ap : run the board's own access point ---------------------------------
+// Useful away from a known network: the ESP32 becomes the network, and the
+// Telnet shell (plus `httpd`) is reachable at the AP's own address. Started
+// alongside the station interface (WIFI_AP_STA) so an existing WiFi
+// connection - and this very session - survives turning the AP on.
+static int cmd_ap(int argc, char **argv, ShellIO &io) {
+  String sub = (argc >= 2) ? String(argv[1]) : String("status");
+
+  if (sub == "start") {
+    String ssid = (argc >= 3) ? String(argv[2]) : (String("ESPEShell-") + g_hostname);
+    String pass = (argc >= 4) ? String(argv[3]) : String("");
+    if (pass.length() > 0 && pass.length() < 8) {
+      io.out.println(F("ap: WPA2 needs a password of at least 8 characters (or none for open)"));
+      return 1;
+    }
+    WiFi.mode(WIFI_AP_STA);
+    bool ok = pass.length() ? WiFi.softAP(ssid.c_str(), pass.c_str())
+                            : WiFi.softAP(ssid.c_str());
+    if (!ok) { io.out.println(F("ap: failed to start")); return 1; }
+    io.out.print(F("ap: \""));
+    io.out.print(ssid);
+    io.out.print(F("\" up at "));
+    io.out.print(WiFi.softAPIP().toString());
+    io.out.println(pass.length() ? F("  (WPA2)") : F("  (open network)"));
+    io.out.printf("    telnet %s %d\n", WiFi.softAPIP().toString().c_str(), TELNET_PORT);
+    return 0;
+  }
+
+  if (sub == "stop") {
+    if (WiFi.softAPgetStationNum() > 0)
+      io.out.printf("ap: dropping %u connected client(s)\n", (unsigned)WiFi.softAPgetStationNum());
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    io.out.println(F("ap: stopped"));
+    return 0;
+  }
+
+  if (sub == "status") {
+    String apSsid = WiFi.softAPSSID();
+    if (apSsid.length() == 0) { io.out.println(F("ap: not running  (ap start [ssid] [pass])")); return 0; }
+    io.out.print(F("ssid:     ")); io.out.println(apSsid);
+    io.out.print(F("address:  ")); io.out.println(WiFi.softAPIP().toString());
+    io.out.print(F("mac:      ")); io.out.println(WiFi.softAPmacAddress());
+    io.out.printf("clients:  %u\n", (unsigned)WiFi.softAPgetStationNum());
+    return 0;
+  }
+
+  io.out.println(F("usage: ap start [ssid] [password] | stop | status"));
+  return 1;
+}
+
 const Command NET_CMDS[] = {
+  {"ap",         cmd_ap,         "ap start [ssid] [pass]|stop", "run the board's own access point", G_NET},
   {"ip",         cmd_ip,         "ip [addr|link|route]", "show network configuration",   G_NET},
   {"wifi",       cmd_wifi,       "wifi status|set <s> <p>|forget", "configure WiFi (persists in NVS)", G_NET},
   {"ping",       cmd_ping,       "ping [-c N] host",     "TCP reachability check",        G_NET},
