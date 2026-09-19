@@ -76,6 +76,7 @@ extern const Command MISC_CMDS[];    extern const size_t MISC_CMDS_N;
 extern const Command ESP_CMDS[];     extern const size_t ESP_CMDS_N;
 extern const Command XFER_CMDS[];    extern const size_t XFER_CMDS_N;
 extern const Command MQTT_CMDS[];    extern const size_t MQTT_CMDS_N;
+extern const Command SCRIPT_CMDS[];  extern const size_t SCRIPT_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];

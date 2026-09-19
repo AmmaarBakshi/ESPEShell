@@ -824,5 +824,6 @@ const CmdTable CMD_TABLES[] = {
   {ESP_CMDS, ESP_CMDS_N},
   {XFER_CMDS, XFER_CMDS_N},
   {MQTT_CMDS, MQTT_CMDS_N},
+  {SCRIPT_CMDS, SCRIPT_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);
