@@ -77,6 +77,7 @@ extern const Command ESP_CMDS[];     extern const size_t ESP_CMDS_N;
 extern const Command XFER_CMDS[];    extern const size_t XFER_CMDS_N;
 extern const Command MQTT_CMDS[];    extern const size_t MQTT_CMDS_N;
 extern const Command SCRIPT_CMDS[];  extern const size_t SCRIPT_CMDS_N;
+extern const Command TIME_CMDS[];    extern const size_t TIME_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -140,6 +141,12 @@ bool   shellWait(ShellIO &io, int ms);   // delay(ms), aborting early on Ctrl-C 
 // ---- WiFi (net_cmds.cpp) - used at boot and by the `wifi` command ----------
 bool wifiConnect(const String &ssid, const String &pass, unsigned long timeoutMs, Print &out);
 void wifiLoadAndConnect(Print &out);   // reads NVS-saved creds, else config.h; called once from setup()
+
+// ---- Wall clock (time_cmds.cpp) - SNTP-backed, timezone saved in NVS ------
+bool   timeIsSet();          // false until SNTP (or `date -s`) has set the clock
+String timeNowString();      // local "YYYY-MM-DD HH:MM:SS", or a "not set" note
+void   timeStartSync(const char *server);
+void   timeInitAtBoot();     // called once from setup() after WiFi comes up
 
 // ---- Boot counter (esp_cmds.cpp) - persisted in NVS, used by `dmesg` -------
 // Increments once per boot (cached after the first call); call once from
