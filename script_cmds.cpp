@@ -1,5 +1,6 @@
 #include "shell.h"
 #include <ctype.h>
+#include <LittleFS.h>
 
 // ============================================================================
 //  Scripting helpers: commands that drive other commands, plus the small
@@ -100,7 +101,93 @@ static int cmd_yes(int argc, char **argv, ShellIO &io) {
 static int cmd_true(int argc, char **argv, ShellIO &io)  { return 0; }
 static int cmd_false(int argc, char **argv, ShellIO &io) { return 1; }
 
+// ---- test / [ : condition evaluation (exit status, no output) --------------
+static long fileSizeOf(const String &abs) {
+  File f = LittleFS.open(abs, "r");
+  if (!f) return -1;
+  long n = f.isDirectory() ? 0 : (long)f.size();
+  f.close();
+  return n;
+}
+
+static int cmd_test(int argc, char **argv, ShellIO &io) {
+  // `[ ... ]` is the same command with a required closing bracket.
+  int n = argc;
+  if (strcmp(argv[0], "[") == 0) {
+    if (n < 2 || strcmp(argv[n - 1], "]") != 0) { io.out.println(F("[: missing ']'")); return 2; }
+    n--;
+  }
+  if (n == 1) return 1;                                   // `test` alone: false
+  if (n == 2) return (strlen(argv[1]) > 0) ? 0 : 1;       // `test STRING`
+
+  if (n == 3) {                                           // unary operators
+    String op = argv[1], arg = argv[2];
+    if (op == "-z") return (arg.length() == 0) ? 0 : 1;
+    if (op == "-n") return (arg.length() > 0) ? 0 : 1;
+    String abs = resolvePath(arg);
+    if (op == "-e") return pathExists(abs) ? 0 : 1;
+    if (op == "-f") return (pathExists(abs) && !isDir(abs)) ? 0 : 1;
+    if (op == "-d") return isDir(abs) ? 0 : 1;
+    if (op == "-s") return (fileSizeOf(abs) > 0) ? 0 : 1;
+    if (op == "-r" || op == "-w") return pathExists(abs) ? 0 : 1;   // LittleFS: no perms
+    io.out.print(F("test: unknown operator ")); io.out.println(op);
+    return 2;
+  }
+
+  if (n == 4) {                                           // binary operators
+    String a = argv[1], op = argv[2], b = argv[3];
+    if (op == "=" || op == "==") return (a == b) ? 0 : 1;
+    if (op == "!=")              return (a != b) ? 0 : 1;
+    long x = a.toInt(), y = b.toInt();
+    if (op == "-eq") return (x == y) ? 0 : 1;
+    if (op == "-ne") return (x != y) ? 0 : 1;
+    if (op == "-lt") return (x <  y) ? 0 : 1;
+    if (op == "-le") return (x <= y) ? 0 : 1;
+    if (op == "-gt") return (x >  y) ? 0 : 1;
+    if (op == "-ge") return (x >= y) ? 0 : 1;
+    io.out.print(F("test: unknown operator ")); io.out.println(op);
+    return 2;
+  }
+  io.out.println(F("test: too many arguments"));
+  return 2;
+}
+
+// ---- expr : integer arithmetic / comparisons, and `length STRING` ----------
+static int cmd_expr(int argc, char **argv, ShellIO &io) {
+  if (argc == 3 && strcmp(argv[1], "length") == 0) {
+    io.out.println((long)strlen(argv[2]));
+    return 0;
+  }
+  if (argc != 4) {
+    io.out.println(F("usage: expr N op N   (op: + - * / % = != < <= > >=)"));
+    io.out.println(F("       expr length STRING"));
+    return 2;
+  }
+  String a = argv[1], op = argv[2], b = argv[3];
+  long x = a.toInt(), y = b.toInt();
+  long r;
+  if      (op == "+") r = x + y;
+  else if (op == "-") r = x - y;
+  else if (op == "*" || op == "x") r = x * y;      // `*` often needs quoting; `x` is the escape hatch
+  else if (op == "/" || op == "%") {
+    if (y == 0) { io.out.println(F("expr: division by zero")); return 2; }
+    r = (op == "/") ? (x / y) : (x % y);
+  }
+  else if (op == "=" || op == "==") r = (a == b) ? 1 : 0;
+  else if (op == "!=") r = (a != b) ? 1 : 0;
+  else if (op == "<")  r = (x <  y) ? 1 : 0;
+  else if (op == "<=") r = (x <= y) ? 1 : 0;
+  else if (op == ">")  r = (x >  y) ? 1 : 0;
+  else if (op == ">=") r = (x >= y) ? 1 : 0;
+  else { io.out.print(F("expr: unknown operator ")); io.out.println(op); return 2; }
+  io.out.println(r);
+  return (r == 0) ? 1 : 0;   // expr(1): a zero result is a "false" exit status
+}
+
 const Command SCRIPT_CMDS[] = {
+  {"test",   cmd_test,   "test EXPR",                "evaluate a condition (exit status)", G_SEARCH},
+  {"[",      cmd_test,   "[ EXPR ]",                 "evaluate a condition (exit status)", G_SEARCH},
+  {"expr",   cmd_expr,   "expr N op N",              "integer arithmetic / comparison",    G_SEARCH},
   {"seq",    cmd_seq,    "seq [first [incr]] last",  "print a number sequence",       G_SEARCH},
   {"yes",    cmd_yes,    "yes [-n N] [string]",      "repeat a string N times",       G_SEARCH},
   {"true",   cmd_true,   "true",                     "do nothing, succeed",           G_SEARCH},
