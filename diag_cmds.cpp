@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include "esp_system.h"
+#include "nvs.h"
 
 // ============================================================================
 //  Diagnostics: the "how is this board actually doing" commands.
@@ -21,7 +22,124 @@ static int cmd_temp(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- nvs : browse the key/value store the shell persists settings in -------
+// Everything ESPEShell remembers across reboots (WiFi credentials, timezone,
+// boot count) lives in one NVS namespace; this is the window onto it.
+static const char *nvsTypeName(nvs_type_t t) {
+  switch (t) {
+    case NVS_TYPE_U8: return "u8";     case NVS_TYPE_I8:  return "i8";
+    case NVS_TYPE_U16: return "u16";   case NVS_TYPE_I16: return "i16";
+    case NVS_TYPE_U32: return "u32";   case NVS_TYPE_I32: return "i32";
+    case NVS_TYPE_U64: return "u64";   case NVS_TYPE_I64: return "i64";
+    case NVS_TYPE_STR: return "str";   case NVS_TYPE_BLOB: return "blob";
+    default: return "?";
+  }
+}
+
+static void nvsPrintValue(Preferences &p, const char *key, nvs_type_t t, ShellIO &io) {
+  switch (t) {
+    case NVS_TYPE_STR:  io.out.println(p.getString(key, "")); break;
+    case NVS_TYPE_U8:   io.out.println((long)p.getUChar(key, 0)); break;
+    case NVS_TYPE_I8:   io.out.println((long)p.getChar(key, 0)); break;
+    case NVS_TYPE_U16:  io.out.println((long)p.getUShort(key, 0)); break;
+    case NVS_TYPE_I16:  io.out.println((long)p.getShort(key, 0)); break;
+    case NVS_TYPE_U32:  io.out.println((unsigned long)p.getUInt(key, 0)); break;
+    case NVS_TYPE_I32:  io.out.println((long)p.getInt(key, 0)); break;
+    case NVS_TYPE_U64:  io.out.println((unsigned long long)p.getULong64(key, 0)); break;
+    case NVS_TYPE_I64:  io.out.println((long long)p.getLong64(key, 0)); break;
+    case NVS_TYPE_BLOB: io.out.printf("<blob, %u bytes>
+", (unsigned)p.getBytesLength(key)); break;
+    default:            io.out.println(F("<unknown type>")); break;
+  }
+}
+
+static int nvsList(ShellIO &io) {
+  Preferences p;
+  if (!p.begin(ESPE_PREFS_NAMESPACE, true)) { io.out.println(F("nvs: cannot open the namespace")); return 1; }
+
+  io.out.print(F("namespace: "));
+  io.out.println(F(ESPE_PREFS_NAMESPACE));
+  io.out.println(F("KEY              TYPE  VALUE"));
+
+  nvs_iterator_t it = nullptr;
+  int n = 0;
+  esp_err_t err = nvs_entry_find("nvs", ESPE_PREFS_NAMESPACE, NVS_TYPE_ANY, &it);
+  while (err == ESP_OK && it) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+    io.out.printf("%-16s %-5s ", info.key, nvsTypeName(info.type));
+    nvsPrintValue(p, info.key, info.type, io);
+    n++;
+    err = nvs_entry_next(&it);
+  }
+  if (it) nvs_release_iterator(it);
+  if (n == 0) io.out.println(F("  (empty)"));
+  io.out.printf("%d key(s), %u free entries in this partition
+", n, (unsigned)p.freeEntries());
+  p.end();
+  return 0;
+}
+
+static int cmd_nvs(int argc, char **argv, ShellIO &io) {
+  String sub = (argc >= 2) ? String(argv[1]) : String("list");
+
+  if (sub == "list" || sub == "ls") return nvsList(io);
+
+  if (sub == "get" && argc >= 3) {
+    Preferences p;
+    if (!p.begin(ESPE_PREFS_NAMESPACE, true)) { io.out.println(F("nvs: cannot open the namespace")); return 1; }
+    if (!p.isKey(argv[2])) { io.out.print(argv[2]); io.out.println(F(": no such key")); p.end(); return 1; }
+    nvsPrintValue(p, argv[2], p.getType(argv[2]), io);
+    p.end();
+    return 0;
+  }
+
+  if (sub == "set" && argc >= 4) {
+    String val = argv[3];
+    for (int i = 4; i < argc; ++i) { val += ' '; val += argv[i]; }
+    Preferences p;
+    if (!p.begin(ESPE_PREFS_NAMESPACE, false)) { io.out.println(F("nvs: cannot open the namespace for writing")); return 1; }
+    size_t w = p.putString(argv[2], val);
+    p.end();
+    if (w == 0) { io.out.println(F("nvs: write failed")); return 1; }
+    io.out.printf("%s = %s (saved)
+", argv[2], val.c_str());
+    return 0;
+  }
+
+  if ((sub == "rm" || sub == "remove") && argc >= 3) {
+    Preferences p;
+    if (!p.begin(ESPE_PREFS_NAMESPACE, false)) { io.out.println(F("nvs: cannot open the namespace for writing")); return 1; }
+    bool ok = p.remove(argv[2]);
+    p.end();
+    if (!ok) { io.out.print(argv[2]); io.out.println(F(": no such key")); return 1; }
+    io.out.printf("%s removed
+", argv[2]);
+    return 0;
+  }
+
+  if (sub == "clear") {
+    // This throws away saved WiFi credentials and the boot counter, so make
+    // the caller say so explicitly.
+    if (argc < 3 || String(argv[2]) != "--force") {
+      io.out.println(F("nvs clear wipes saved WiFi credentials, the timezone and the boot count."));
+      io.out.println(F("Re-run as: nvs clear --force"));
+      return 1;
+    }
+    Preferences p;
+    if (!p.begin(ESPE_PREFS_NAMESPACE, false)) { io.out.println(F("nvs: cannot open the namespace for writing")); return 1; }
+    p.clear();
+    p.end();
+    io.out.println(F("nvs: namespace cleared"));
+    return 0;
+  }
+
+  io.out.println(F("usage: nvs [list] | get <key> | set <key> <value> | rm <key> | clear --force"));
+  return 1;
+}
+
 const Command DIAG_CMDS[] = {
+  {"nvs",  cmd_nvs,  "nvs [list|get|set|rm|clear]", "browse persistent settings (NVS)", G_ESP},
   {"temp", cmd_temp, "temp", "internal die temperature", G_ESP},
 };
 const size_t DIAG_CMDS_N = sizeof(DIAG_CMDS) / sizeof(DIAG_CMDS[0]);
