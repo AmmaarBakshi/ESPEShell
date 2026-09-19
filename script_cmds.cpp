@@ -184,7 +184,30 @@ static int cmd_expr(int argc, char **argv, ShellIO &io) {
   return (r == 0) ? 1 : 0;   // expr(1): a zero result is a "false" exit status
 }
 
+// ---- time : run a command and report how long it took ----------------------
+static int cmd_time(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: time <command...>")); return 1; }
+  String line = joinArgs(argc, argv, 1);
+
+  uint32_t heapBefore = ESP.getFreeHeap();
+  unsigned long t0 = micros();
+  int rc = runLine(line, io.out, io.rawIn);
+  unsigned long us = micros() - t0;
+  uint32_t heapAfter = ESP.getFreeHeap();
+
+  io.out.printf("
+real  %lu.%03lu s  (%lu us)
+", us / 1000000UL, (us / 1000UL) % 1000UL, us);
+  io.out.printf("heap  %ld bytes %s
+", (long)heapBefore - (long)heapAfter,
+                (heapAfter <= heapBefore) ? "used" : "freed");
+  io.out.printf("exit  %d
+", rc);
+  return rc;
+}
+
 const Command SCRIPT_CMDS[] = {
+  {"time",   cmd_time,   "time <command...>",        "time a command (and heap delta)",    G_SEARCH},
   {"test",   cmd_test,   "test EXPR",                "evaluate a condition (exit status)", G_SEARCH},
   {"[",      cmd_test,   "[ EXPR ]",                 "evaluate a condition (exit status)", G_SEARCH},
   {"expr",   cmd_expr,   "expr N op N",              "integer arithmetic / comparison",    G_SEARCH},
