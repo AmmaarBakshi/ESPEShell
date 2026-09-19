@@ -127,7 +127,73 @@ static int cmd_md5sum(int argc, char **argv, ShellIO &io)    { return digestMain
 static int cmd_sha256sum(int argc, char **argv, ShellIO &io) { return digestMain(argc, argv, io, sha256Of); }
 static int cmd_crc32(int argc, char **argv, ShellIO &io)     { return digestMain(argc, argv, io, crc32Of); }
 
+// ---- base64 : encode / decode (text in, text out - pipes welcome) ----------
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static int b64Value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static int cmd_base64(int argc, char **argv, ShellIO &io) {
+  bool decode = false;
+  int first = 1;
+  for (; first < argc; ++first) {
+    String a = argv[first];
+    if (a == "-d" || a == "--decode") decode = true;
+    else break;
+  }
+
+  String data;
+  if (!collectInput(argc, argv, first, io, data)) {
+    io.out.println(F("usage: base64 [-d] [file]   (or pipe data in)"));
+    return 1;
+  }
+
+  if (!decode) {
+    size_t len = data.length();
+    const uint8_t *d = (const uint8_t *)data.c_str();
+    String line;
+    for (size_t i = 0; i < len; i += 3) {
+      uint32_t v = (uint32_t)d[i] << 16;
+      if (i + 1 < len) v |= (uint32_t)d[i + 1] << 8;
+      if (i + 2 < len) v |= d[i + 2];
+      line += B64[(v >> 18) & 0x3F];
+      line += B64[(v >> 12) & 0x3F];
+      line += (i + 1 < len) ? B64[(v >> 6) & 0x3F] : '=';
+      line += (i + 2 < len) ? B64[v & 0x3F] : '=';
+      if (line.length() >= 76) { io.out.println(line); line = ""; }   // wrap like base64(1)
+    }
+    if (line.length()) io.out.println(line);
+    return 0;
+  }
+
+  // Decode: ignore whitespace/newlines, stop at padding.
+  int acc = 0, bits = 0;
+  String out;
+  for (size_t i = 0; i < data.length(); ++i) {
+    char c = data[i];
+    if (c == '=' ) break;
+    if (c == '
+' || c == '' || c == ' ' || c == '	') continue;
+    int v = b64Value(c);
+    if (v < 0) { io.out.println(F("base64: invalid input")); return 1; }
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) { bits -= 8; out += (char)((acc >> bits) & 0xFF); }
+  }
+  io.out.print(out);
+  if (out.length() && out[out.length() - 1] != '
+') io.out.println();
+  return 0;
+}
+
 const Command HASH_CMDS[] = {
+  {"base64",    cmd_base64,    "base64 [-d] [file]",  "base64 encode / decode",          G_TEXT},
   {"md5sum",    cmd_md5sum,    "md5sum <file>...",    "MD5 digest of files / stdin",     G_TEXT},
   {"sha256sum", cmd_sha256sum, "sha256sum <file>...", "SHA-256 digest of files / stdin", G_TEXT},
   {"crc32",     cmd_crc32,     "crc32 <file>...",     "CRC-32 checksum of files / stdin",G_TEXT},
