@@ -329,7 +329,53 @@ static int cmd_pinwatch(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- pinout : what each pin on a DevKit V1 can actually do -----------------
+struct PinNote {
+  uint8_t pin;
+  const char *note;
+};
+
+static const PinNote PINOUT[] = {
+  { 0, "BOOT button, strapping - must be HIGH at reset; ADC2, touch"},
+  { 1, "TX0 - USB serial, avoid"},
+  { 2, "onboard LED, strapping; ADC2, touch"},
+  { 3, "RX0 - USB serial, avoid"},
+  { 4, "free; ADC2, touch"},
+  { 5, "strapping (HIGH at reset), default SPI SS"},
+  {12, "strapping - must be LOW at reset; ADC2, touch"},
+  {13, "free; ADC2, touch"},
+  {14, "free; ADC2, touch"},
+  {15, "strapping; ADC2, touch"},
+  {16, "free (RX2)"},
+  {17, "free (TX2)"},
+  {18, "free, default SPI SCK"},
+  {19, "free, default SPI MISO"},
+  {21, "free, default I2C SDA"},
+  {22, "free, default I2C SCL"},
+  {23, "free, default SPI MOSI"},
+  {25, "free; DAC1, ADC2"},
+  {26, "free; DAC2, ADC2"},
+  {27, "free; ADC2, touch"},
+  {32, "free; ADC1 (safe with WiFi), touch"},
+  {33, "free; ADC1 (safe with WiFi), touch"},
+  {34, "input only; ADC1"},
+  {35, "input only; ADC1"},
+  {36, "input only (VP); ADC1"},
+  {39, "input only (VN); ADC1"},
+};
+
+static int cmd_pinout(int argc, char **argv, ShellIO &io) {
+  io.out.println(F("ESP32 DevKit V1 (WROOM-32) - usable pins:"));
+  io.out.println(F("GPIO  NOW  NOTES"));
+  for (const PinNote &p : PINOUT)
+    io.out.printf("%-5d %-4d %s\n", p.pin, digitalRead(p.pin), p.note);
+  io.out.println(F("GPIO6-11 are wired to the SPI flash - using them crashes the chip."));
+  io.out.println(F("ADC2 pins cannot be read while WiFi is connected; ADC1 (32-39) always can."));
+  return 0;
+}
+
 const Command GPIO_CMDS[] = {
+  {"pinout",   cmd_pinout,   "pinout",                      "board pin map and warnings", G_ESP},
   {"pinwatch", cmd_pinwatch, "pinwatch <pin> [-up] [-t s]", "log a pin's edges live",  G_ESP},
   {"touchpin", cmd_touchpin, "touchpin <pin> [-n N]", "capacitive touch reading",     G_ESP},
   {"servo", cmd_servo, "servo <pin> <0-180|off>",  "drive a hobby servo (50 Hz PWM)",   G_ESP},
