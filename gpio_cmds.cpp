@@ -62,7 +62,50 @@ static int cmd_adc(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- dac : true analog out on GPIO25 / GPIO26 ------------------------------
+// The classic ESP32 has two 8-bit DACs. Unlike `pwm` this is a real voltage,
+// not a switching average, so it drives filters and audio directly.
+static int cmd_dac(int argc, char **argv, ShellIO &io) {
+#if SOC_DAC_SUPPORTED
+  if (argc < 3) {
+    io.out.println(F("usage: dac <25|26> <0-255|volts like 1.8v|off>"));
+    return 1;
+  }
+  int pin = atoi(argv[1]);
+  if (pin != 25 && pin != 26) { io.out.println(F("dac: only GPIO25 and GPIO26 have a DAC")); return 1; }
+
+  String v = argv[2];
+  if (v == "off" || v == "0v") {
+    dacDisable(pin);
+    espeReleasePin(pin);
+    io.out.printf("DAC GPIO%d off
+", pin);
+    return 0;
+  }
+
+  int level;
+  if (v.endsWith("v") || v.endsWith("V")) {           // dac 25 1.8v
+    double volts = v.substring(0, v.length() - 1).toDouble();
+    if (volts < 0 || volts > 3.3) { io.out.println(F("dac: volts must be 0.0 - 3.3")); return 1; }
+    level = (int)(volts / 3.3 * 255.0 + 0.5);
+  } else {
+    level = v.toInt();
+    if (level < 0 || level > 255) { io.out.println(F("dac: level must be 0 - 255")); return 1; }
+  }
+
+  dacWrite(pin, (uint8_t)level);
+  espeMarkPin(pin, PIN_DAC);
+  io.out.printf("DAC GPIO%d = %d  (~%.2f V)
+", pin, level, level * 3.3 / 255.0);
+  return 0;
+#else
+  io.out.println(F("dac: this chip has no DAC"));
+  return 1;
+#endif
+}
+
 const Command GPIO_CMDS[] = {
+  {"dac", cmd_dac, "dac <25|26> <0-255|off>",  "analog output voltage (8-bit DAC)", G_ESP},
   {"adc", cmd_adc, "adc <pin> [-n N] [-d ms]", "read an analog input (raw + mV)", G_ESP},
 };
 const size_t GPIO_CMDS_N = sizeof(GPIO_CMDS) / sizeof(GPIO_CMDS[0]);
