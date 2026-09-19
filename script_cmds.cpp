@@ -44,7 +44,32 @@ static int cmd_watch(int argc, char **argv, ShellIO &io) {
   }
 }
 
+// ---- repeat : run a command N times ----------------------------------------
+static int cmd_repeat(int argc, char **argv, ShellIO &io) {
+  if (argc < 3) {
+    io.out.println(F("usage: repeat <count> [-d ms] <command...>"));
+    return 1;
+  }
+  long count = String(argv[1]).toInt();
+  if (count <= 0) { io.out.println(F("repeat: count must be > 0")); return 1; }
+  int i = 2, delayMs = 0;
+  if (String(argv[i]) == "-d" && i + 1 < argc) { delayMs = String(argv[i + 1]).toInt(); i += 2; }
+  if (i >= argc) { io.out.println(F("repeat: no command given")); return 1; }
+  String line = joinArgs(argc, argv, i);
+
+  int rc = 0;
+  for (long n = 0; n < count; ++n) {
+    rc = runLine(line, io.out, io.rawIn);
+    if (delayMs > 0 && n + 1 < count && shellWait(io, delayMs)) {
+      io.out.println(F("repeat: stopped."));
+      return rc;
+    }
+  }
+  return rc;
+}
+
 const Command SCRIPT_CMDS[] = {
+  {"repeat", cmd_repeat, "repeat N [-d ms] cmd",     "run a command N times",         G_SEARCH},
   {"watch", cmd_watch, "watch [-n secs] [-t] cmd", "re-run a command periodically", G_SEARCH},
 };
 const size_t SCRIPT_CMDS_N = sizeof(SCRIPT_CMDS) / sizeof(SCRIPT_CMDS[0]);
