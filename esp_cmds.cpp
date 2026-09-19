@@ -257,6 +257,71 @@ static int cmd_i2cscan(int argc, char **argv, ShellIO &io) {
   return found ? 0 : 1;
 }
 
+// ---- i2c : talk to a device found by i2cscan -------------------------------
+// The usual next step after a scan: poke at a sensor's registers without
+// writing a sketch for it.
+static int cmd_i2c(int argc, char **argv, ShellIO &io) {
+  String sub = (argc >= 2) ? String(argv[1]) : String("");
+  auto num = [](const char *s) -> long { return (long)strtol(s, nullptr, 0); };  // 0x.. or decimal
+
+  if (sub == "get" && argc >= 4) {
+    uint8_t addr = (uint8_t)num(argv[2]);
+    uint8_t reg  = (uint8_t)num(argv[3]);
+    int count = (argc >= 5) ? (int)num(argv[4]) : 1;
+    if (count < 1) count = 1;
+    if (count > 32) count = 32;
+    Wire.begin();
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    uint8_t err = Wire.endTransmission(false);    // repeated start
+    if (err) { io.out.printf("i2c: no ack from 0x%02X (error %u)\n", addr, err); return 1; }
+    int got = Wire.requestFrom((int)addr, count);
+    if (got < 1) { io.out.printf("i2c: 0x%02X returned nothing\n", addr); return 1; }
+    io.out.printf("0x%02X reg 0x%02X:", addr, reg);
+    for (int i = 0; i < got; ++i) io.out.printf(" %02X", Wire.read());
+    io.out.println();
+    return 0;
+  }
+
+  if (sub == "set" && argc >= 5) {
+    uint8_t addr = (uint8_t)num(argv[2]);
+    uint8_t reg  = (uint8_t)num(argv[3]);
+    uint8_t val  = (uint8_t)num(argv[4]);
+    Wire.begin();
+    Wire.beginTransmission(addr);
+    Wire.write(reg);
+    Wire.write(val);
+    uint8_t err = Wire.endTransmission();
+    if (err) { io.out.printf("i2c: write failed (error %u)\n", err); return 1; }
+    io.out.printf("0x%02X reg 0x%02X <- 0x%02X\n", addr, reg, val);
+    return 0;
+  }
+
+  if (sub == "dump" && argc >= 3) {
+    uint8_t addr = (uint8_t)num(argv[2]);
+    int from = (argc >= 4) ? (int)num(argv[3]) : 0;
+    int to   = (argc >= 5) ? (int)num(argv[4]) : 0xFF;
+    Wire.begin();
+    io.out.printf("register dump of 0x%02X (0x%02X..0x%02X)\n", addr, from, to);
+    for (int r = from; r <= to; r += 16) {
+      io.out.printf("  %02X:", r);
+      for (int c = 0; c < 16 && r + c <= to; ++c) {
+        Wire.beginTransmission(addr);
+        Wire.write((uint8_t)(r + c));
+        if (Wire.endTransmission(false) || Wire.requestFrom((int)addr, 1) < 1) io.out.print(F(" --"));
+        else io.out.printf(" %02X", Wire.read());
+      }
+      io.out.println();
+      if (shellWait(io, 1)) { io.out.println(F("i2c: stopped.")); return 0; }
+    }
+    return 0;
+  }
+
+  io.out.println(F("usage: i2c get <addr> <reg> [count] | set <addr> <reg> <val> | dump <addr> [from] [to]"));
+  io.out.println(F("       addresses and registers take 0x.. or decimal; run i2cscan first"));
+  return 1;
+}
+
 // ---- wifiscan -------------------------------------------------------------
 static const char *encName(wifi_auth_mode_t enc) {
   switch (enc) {
@@ -593,6 +658,7 @@ const Command ESP_CMDS[] = {
   {"deepsleep", cmd_deepsleep, "deepsleep <secs> [pinN v]","deep sleep (resets on wake)",  G_ESP},
   {"dmesg",     cmd_dmesg,     "dmesg",                   "reset reason, wake cause, boot count", G_ESP},
   {"i2cscan", cmd_i2cscan, "i2cscan [-sda P] [-scl P]", "scan the I2C bus for devices", G_ESP},
+  {"i2c",     cmd_i2c,     "i2c get|set|dump <addr> ..","read / write I2C registers",   G_ESP},
   {"wifiscan",cmd_wifiscan,"wifiscan",                   "list nearby WiFi networks",    G_ESP},
   {"restart", cmd_restart, "restart",            "reboot the ESP32",                    G_ESP},
   {"reboot",  cmd_restart, "reboot",             "reboot the ESP32",                    G_ESP},
