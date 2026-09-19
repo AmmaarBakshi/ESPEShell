@@ -98,6 +98,12 @@ void   envSet(const String &key, const String &val);
 bool   envUnset(const String &key);
 const std::vector<std::pair<String, String>> &envAll();
 
+// ---- Aliases ---------------------------------------------------------------
+String aliasGet(const String &name);
+void   aliasSet(const String &name, const String &val);
+bool   aliasUnset(const String &name);
+const std::vector<std::pair<String, String>> &aliasAll();
+
 // ---- Command history (interactive lines only - see ESPEShell.ino) ---------
 void   historyAdd(const String &line);
 size_t historyCount();

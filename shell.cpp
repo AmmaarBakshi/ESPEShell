@@ -14,6 +14,7 @@ volatile uint32_t g_bytesIn = 0;
 volatile uint32_t g_bytesOut = 0;
 
 static std::vector<std::pair<String, String>> s_env;
+static std::vector<std::pair<String, String>> s_alias;
 
 // ============================================================================
 //  Environment variables
@@ -42,6 +43,29 @@ bool envUnset(const String &key) {
 }
 
 const std::vector<std::pair<String, String>> &envAll() { return s_env; }
+
+// ============================================================================
+//  Aliases (RAM only - put your favourites in /boot.sh to get them at boot)
+// ============================================================================
+String aliasGet(const String &name) {
+  for (auto &kv : s_alias)
+    if (kv.first == name) return kv.second;
+  return "";
+}
+
+void aliasSet(const String &name, const String &val) {
+  for (auto &kv : s_alias)
+    if (kv.first == name) { kv.second = val; return; }
+  s_alias.push_back(std::make_pair(name, val));
+}
+
+bool aliasUnset(const String &name) {
+  for (size_t i = 0; i < s_alias.size(); ++i)
+    if (s_alias[i].first == name) { s_alias.erase(s_alias.begin() + i); return true; }
+  return false;
+}
+
+const std::vector<std::pair<String, String>> &aliasAll() { return s_alias; }
 
 // ============================================================================
 //  Path helpers
@@ -444,6 +468,27 @@ String toUnixEol(const String &s) {
   return o;
 }
 
+// Replaces a leading alias with its expansion, repeatedly (so one alias may
+// build on another). A word is expanded at most once per line, which is what
+// stops `alias ls='ls -l'` from recursing forever.
+static void expandAliases(std::vector<String> &args) {
+  std::vector<String> used;
+  for (int depth = 0; depth < 8 && !args.empty(); ++depth) {
+    String head = args[0];
+    bool seen = false;
+    for (auto &u : used) if (u == head) { seen = true; break; }
+    if (seen) return;
+    String val = aliasGet(head);
+    if (val.length() == 0) return;
+    used.push_back(head);
+    std::vector<String> expanded;
+    tokenize(val, expanded);
+    if (expanded.empty()) return;
+    args.erase(args.begin());
+    args.insert(args.begin(), expanded.begin(), expanded.end());
+  }
+}
+
 // ============================================================================
 //  Dispatch: pipes + redirection
 // ============================================================================
@@ -463,6 +508,7 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
 
     std::vector<String> args;
     tokenize(segs[s], args);
+    expandAliases(args);
 
     String redir;
     bool append = false;
@@ -667,6 +713,45 @@ static int cmd_history(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- alias / unalias -------------------------------------------------------
+static int cmd_alias(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    for (auto &kv : aliasAll()) {
+      io.out.print(F("alias "));
+      io.out.print(kv.first);
+      io.out.print(F("='"));
+      io.out.print(kv.second);
+      io.out.println(F("'"));
+    }
+    return 0;
+  }
+  int rc = 0;
+  for (int a = 1; a < argc; ++a) {
+    String spec = argv[a];
+    int eq = spec.indexOf('=');
+    if (eq < 0) {                       // `alias name` -> show just that one
+      String v = aliasGet(spec);
+      if (v.length() == 0) { io.out.print(F("alias: ")); io.out.print(spec); io.out.println(F(": not found")); rc = 1; }
+      else { io.out.print(F("alias ")); io.out.print(spec); io.out.print(F("='")); io.out.print(v); io.out.println(F("'")); }
+      continue;
+    }
+    String name = spec.substring(0, eq);
+    String val  = spec.substring(eq + 1);
+    name.trim();
+    if (name.length() == 0) { io.out.println(F("alias: empty name")); rc = 1; continue; }
+    aliasSet(name, val);
+  }
+  return rc;
+}
+
+static int cmd_unalias(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: unalias name...")); return 1; }
+  int rc = 0;
+  for (int a = 1; a < argc; ++a)
+    if (!aliasUnset(argv[a])) { io.out.print(argv[a]); io.out.println(F(": not an alias")); rc = 1; }
+  return rc;
+}
+
 static int cmd_clear(int argc, char **argv, ShellIO &io) {
   io.out.print(F("\033[2J\033[H"));
   return 0;
@@ -715,6 +800,8 @@ const Command CORE_CMDS[] = {
   {"man",     cmd_man,     "man <cmd>",           "show the manual entry for a command", G_CORE},
   {"whatis",  cmd_whatis,  "whatis <cmd>...",     "one-line description of a command",   G_CORE},
   {"apropos", cmd_apropos, "apropos <keyword>",   "search commands by keyword",          G_CORE},
+  {"alias",   cmd_alias,   "alias [name=cmd]",    "define or list command aliases",      G_CORE},
+  {"unalias", cmd_unalias, "unalias name...",     "remove a command alias",              G_CORE},
   {"history", cmd_history, "history [-c]",        "list (or clear) the command history",  G_CORE},
   {"clear",   cmd_clear,   "clear",               "clear the screen",                    G_CORE},
   {"sh",      cmd_sh,      "sh <file>",           "run stored shell commands from a file",G_CORE},
