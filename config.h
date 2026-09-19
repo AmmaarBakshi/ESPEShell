@@ -46,4 +46,4 @@
 #define MQTT_BROKER_PORT  1883
 
 // ---- Version ---------------------------------------------------------------
-#define ESPE_VERSION    "0.2.0"
+#define ESPE_VERSION    "0.3.0"
