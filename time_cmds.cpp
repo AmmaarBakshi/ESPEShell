@@ -147,7 +147,76 @@ static int cmd_date(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- cal : a month calendar ------------------------------------------------
+static bool isLeap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
+
+static int daysInMonth(int m, int y) {
+  static const int d[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (m == 2 && isLeap(y)) return 29;
+  return d[m - 1];
+}
+
+// Zeller's congruence: weekday of the 1st, 0 = Sunday.
+static int firstWeekday(int m, int y) {
+  int q = 1, mm = m, yy = y;
+  if (mm < 3) { mm += 12; yy -= 1; }
+  int k = yy % 100, j = yy / 100;
+  int h = (q + (13 * (mm + 1)) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+  return (h + 6) % 7;   // Zeller: 0 = Saturday -> shift so 0 = Sunday
+}
+
+static int cmd_cal(int argc, char **argv, ShellIO &io) {
+  static const char *MON[] = {"January", "February", "March", "April", "May", "June",
+                              "July", "August", "September", "October", "November", "December"};
+  int month = 0, year = 0;
+
+  if (argc == 1) {
+    if (!timeIsSet()) {
+      io.out.println(F("cal: clock not set - run 'ntp', or give a month and year: cal 6 2026"));
+      return 1;
+    }
+    time_t t = time(nullptr) + tzOffset();
+    struct tm tmv;
+    gmtime_r(&t, &tmv);
+    month = tmv.tm_mon + 1;
+    year  = tmv.tm_year + 1900;
+  } else if (argc == 3) {
+    month = String(argv[1]).toInt();
+    year  = String(argv[2]).toInt();
+  } else if (argc == 2) {
+    year = String(argv[1]).toInt();
+    month = 0;                     // whole year is a lot of scrolling: months 1..12
+  } else {
+    io.out.println(F("usage: cal [[month] year]"));
+    return 1;
+  }
+  if (year < 1900 || year > 2100) { io.out.println(F("cal: year must be 1900 - 2100")); return 1; }
+
+  int from = month ? month : 1, to = month ? month : 12;
+  if (month && (month < 1 || month > 12)) { io.out.println(F("cal: month must be 1 - 12")); return 1; }
+
+  for (int m = from; m <= to; ++m) {
+    char head[32];
+    snprintf(head, sizeof(head), "%s %d", MON[m - 1], year);
+    int pad = (20 - (int)strlen(head)) / 2;
+    for (int i = 0; i < pad; ++i) io.out.print(' ');
+    io.out.println(head);
+    io.out.println(F("Su Mo Tu We Th Fr Sa"));
+
+    int wd = firstWeekday(m, year);
+    for (int i = 0; i < wd; ++i) io.out.print(F("   "));
+    for (int d = 1; d <= daysInMonth(m, year); ++d) {
+      io.out.printf("%2d ", d);
+      if (++wd == 7) { wd = 0; io.out.println(); }
+    }
+    if (wd != 0) io.out.println();
+    if (m != to) io.out.println();
+  }
+  return 0;
+}
+
 const Command TIME_CMDS[] = {
+  {"cal",  cmd_cal,  "cal [[month] year]",         "print a month calendar",      G_SYS},
   {"date", cmd_date, "date [-u] [+FMT] | -s TIME", "show / set the wall clock",   G_SYS},
   {"ntp",  cmd_ntp,  "ntp [sync [srv]|tz H|status]","sync the clock over SNTP",   G_SYS},
 };
