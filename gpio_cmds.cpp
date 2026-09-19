@@ -104,7 +104,65 @@ static int cmd_dac(int argc, char **argv, ShellIO &io) {
 #endif
 }
 
+// ---- tone / beep : square wave on a pin (buzzer, piezo) --------------------
+static int cmd_tone(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) {
+    io.out.println(F("usage: tone <pin> <freq-hz> [ms]   |   tone <pin> off"));
+    io.out.println(F("       tone 13 440 500   -> A4 for half a second"));
+    return 1;
+  }
+  int pin = atoi(argv[1]);
+  if (!espePinUsable(pin) || espePinInputOnly(pin)) {
+    io.out.printf("tone: GPIO%d cannot drive an output
+", pin);
+    return 1;
+  }
+  if (argc >= 3 && String(argv[2]) == "off") {
+    noTone(pin);
+    espeReleasePin(pin);
+    io.out.printf("tone: GPIO%d silenced
+", pin);
+    return 0;
+  }
+  if (argc < 3) { io.out.println(F("tone: frequency required")); return 1; }
+
+  long freq = String(argv[2]).toInt();
+  if (freq < 20 || freq > 20000) { io.out.println(F("tone: frequency must be 20 - 20000 Hz")); return 1; }
+  long ms = (argc >= 4) ? String(argv[3]).toInt() : 0;
+
+  espeMarkPin(pin, PIN_TONE);
+  if (ms > 0) {
+    io.out.printf("GPIO%d: %ld Hz for %ld ms
+", pin, freq, ms);
+    tone(pin, (unsigned int)freq);
+    bool stopped = shellWait(io, (int)ms);
+    noTone(pin);
+    espeReleasePin(pin);
+    if (stopped) io.out.println(F("tone: stopped."));
+  } else {
+    tone(pin, (unsigned int)freq);
+    io.out.printf("GPIO%d: %ld Hz (running - 'tone %d off' to stop)
+", pin, freq, pin);
+  }
+  return 0;
+}
+
+// `beep` is just the onboard-friendly shorthand people reach for first.
+static int cmd_beep(int argc, char **argv, ShellIO &io) {
+  int pin  = (argc >= 2) ? atoi(argv[1]) : 13;
+  long ms  = (argc >= 3) ? String(argv[2]).toInt() : 150;
+  char freq[] = "1000";
+  char msBuf[12];
+  snprintf(msBuf, sizeof(msBuf), "%ld", ms);
+  char pinBuf[8];
+  snprintf(pinBuf, sizeof(pinBuf), "%d", pin);
+  char *fake[4] = { (char *)"tone", pinBuf, freq, msBuf };
+  return cmd_tone(4, fake, io);
+}
+
 const Command GPIO_CMDS[] = {
+  {"tone", cmd_tone, "tone <pin> <hz> [ms]|off", "square-wave tone on a pin",         G_ESP},
+  {"beep", cmd_beep, "beep [pin] [ms]",          "short 1 kHz beep (default GPIO13)", G_ESP},
   {"dac", cmd_dac, "dac <25|26> <0-255|off>",  "analog output voltage (8-bit DAC)", G_ESP},
   {"adc", cmd_adc, "adc <pin> [-n N] [-d ms]", "read an analog input (raw + mV)", G_ESP},
 };
