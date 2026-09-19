@@ -207,7 +207,70 @@ static int cmd_bench(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- neofetch : the whole board on one screen ------------------------------
+static String uptimeText() {
+  unsigned long sec = millis() / 1000UL;
+  unsigned d = sec / 86400; sec %= 86400;
+  unsigned h = sec / 3600;  sec %= 3600;
+  unsigned m = sec / 60;
+  char b[48];
+  if (d) snprintf(b, sizeof(b), "%ud %uh %um", d, h, m);
+  else if (h) snprintf(b, sizeof(b), "%uh %um", h, m);
+  else snprintf(b, sizeof(b), "%um %lus", m, (unsigned long)(sec % 60));
+  return String(b);
+}
+
+static int cmd_neofetch(int argc, char **argv, ShellIO &io) {
+  // Left column: a small ESP logo. Right column: the facts.
+  std::vector<String> info;
+  info.push_back(g_user + "@" + g_hostname);
+  info.push_back(F("-----------------"));
+  info.push_back(String(F("OS:       ESPEShell ")) + ESPE_VERSION);
+  info.push_back(String(F("Kernel:   Arduino-ESP32 / IDF ")) + ESP.getSdkVersion());
+  info.push_back(String(F("Uptime:   ")) + uptimeText());
+  info.push_back(String(F("Boots:    #")) + String(espeBootCount()));
+  info.push_back(String(F("Chip:     ")) + ESP.getChipModel() + " rev" + String(ESP.getChipRevision()) +
+                 ", " + String(ESP.getChipCores()) + " cores @ " + String(getCpuFrequencyMhz()) + " MHz");
+  info.push_back(String(F("Flash:    ")) + humanBytes(ESP.getFlashChipSize()) + " @ " +
+                 String(ESP.getFlashChipSpeed() / 1000000UL) + " MHz");
+  info.push_back(String(F("Memory:   ")) + humanBytes(ESP.getHeapSize() - ESP.getFreeHeap()) + " / " +
+                 humanBytes(ESP.getHeapSize()) + " used");
+  info.push_back(String(F("Disk:     ")) + humanBytes(LittleFS.usedBytes()) + " / " +
+                 humanBytes(LittleFS.totalBytes()) + " used (LittleFS)");
+  if (WiFi.status() == WL_CONNECTED) {
+    info.push_back(String(F("WiFi:     ")) + WiFi.SSID() + "  " + WiFi.RSSI() + " dBm");
+    info.push_back(String(F("IP:       ")) + WiFi.localIP().toString());
+  } else {
+    info.push_back(String(F("WiFi:     not connected")));
+  }
+  info.push_back(String(F("Shell:    ")) + (g_telnetPeer.length() ? ("telnet from " + g_telnetPeer) : String("serial")));
+  info.push_back(String(F("Temp:     ")) + String(temperatureRead(), 1) + " C (die)");
+  info.push_back(String(F("Clock:    ")) + timeNowString());
+
+  static const char *logo[] = {
+    "   _____  ",
+    "  |  ___| ",
+    "  | |__   ",
+    "  |  __|  ",
+    "  | |___  ",
+    "  |_____| ",
+    "  E S P   ",
+    "  3 2     ",
+  };
+  const size_t logoN = sizeof(logo) / sizeof(logo[0]);
+
+  size_t rows = (info.size() > logoN) ? info.size() : logoN;
+  for (size_t i = 0; i < rows; ++i) {
+    io.out.print(i < logoN ? logo[i] : "          ");
+    io.out.print(F("  "));
+    io.out.println(i < info.size() ? info[i] : String());
+  }
+  return 0;
+}
+
 const Command DIAG_CMDS[] = {
+  {"neofetch", cmd_neofetch, "neofetch",              "the whole board at a glance",     G_ESP},
+  {"sysinfo",  cmd_neofetch, "sysinfo",               "the whole board at a glance",     G_ESP},
   {"bench", cmd_bench, "bench [cpu|fs]",             "quick CPU / filesystem benchmark", G_ESP},
   {"nvs",  cmd_nvs,  "nvs [list|get|set|rm|clear]", "browse persistent settings (NVS)", G_ESP},
   {"temp", cmd_temp, "temp", "internal die temperature", G_ESP},
