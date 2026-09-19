@@ -127,6 +127,8 @@ void historyAdd(const String &line) {
 
 size_t historyCount() { return s_history.size(); }
 
+void historyClear() { s_history.clear(); }
+
 String historyGet(int indexFromEnd) {
   int i = (int)s_history.size() - 1 - indexFromEnd;
   if (i < 0 || i >= (int)s_history.size()) return "";
@@ -649,6 +651,22 @@ static int cmd_apropos(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- history : the interactive line history (shared by Serial + Telnet) ----
+static int cmd_history(int argc, char **argv, ShellIO &io) {
+  if (argc >= 2 && (strcmp(argv[1], "-c") == 0 || strcmp(argv[1], "--clear") == 0)) {
+    historyClear();
+    io.out.println(F("history cleared"));
+    return 0;
+  }
+  size_t n = historyCount();
+  for (size_t i = 0; i < n; ++i) {
+    // historyGet(0) is the newest, so walk backwards to print oldest first.
+    io.out.printf("%4u  %s
+", (unsigned)(i + 1), historyGet((int)(n - 1 - i)).c_str());
+  }
+  return 0;
+}
+
 static int cmd_clear(int argc, char **argv, ShellIO &io) {
   io.out.print(F("\033[2J\033[H"));
   return 0;
@@ -697,6 +715,7 @@ const Command CORE_CMDS[] = {
   {"man",     cmd_man,     "man <cmd>",           "show the manual entry for a command", G_CORE},
   {"whatis",  cmd_whatis,  "whatis <cmd>...",     "one-line description of a command",   G_CORE},
   {"apropos", cmd_apropos, "apropos <keyword>",   "search commands by keyword",          G_CORE},
+  {"history", cmd_history, "history [-c]",        "list (or clear) the command history",  G_CORE},
   {"clear",   cmd_clear,   "clear",               "clear the screen",                    G_CORE},
   {"sh",      cmd_sh,      "sh <file>",           "run stored shell commands from a file",G_CORE},
   {"exit",    cmd_exit,    "exit",                "end this session (Telnet)",           G_CORE},

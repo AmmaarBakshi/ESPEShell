@@ -102,6 +102,7 @@ const std::vector<std::pair<String, String>> &envAll();
 void   historyAdd(const String &line);
 size_t historyCount();
 String historyGet(int indexFromEnd);   // 0 = most recently added
+void   historyClear();
 
 // ---- Tab completion ---------------------------------------------------------
 // Completes the last token of `partial`: a command name if it's the first
