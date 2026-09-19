@@ -290,21 +290,6 @@ static int cmd_led(int argc, char **argv, ShellIO &io) {
 }
 
 // ---- blink : flash the onboard LED for a while -----------------------------
-// Sleeps `ms`, returning true if Ctrl-C arrived on the live connection so a
-// long blink doesn't hold the shell hostage.
-static bool blinkWait(ShellIO &io, int ms) {
-  unsigned long start = millis();
-  while (millis() - start < (unsigned long)ms) {
-    if (io.rawIn && io.rawIn->available()) {
-      int c = io.rawIn->read();
-      g_bytesIn++;
-      if (c == 0x03) return true;   // Ctrl-C
-    }
-    delay(2);
-  }
-  return false;
-}
-
 static int cmd_blink(int argc, char **argv, ShellIO &io) {
   int secs = 10;   // default: blink for 10 seconds
   int rate = 1;    // default: 1 blink per second
@@ -344,9 +329,9 @@ static int cmd_blink(int argc, char **argv, ShellIO &io) {
   bool aborted = false;
   while (millis() - start < durMs) {
     digitalWrite(pin, HIGH);
-    if (blinkWait(io, halfMs)) { aborted = true; break; }
+    if (shellWait(io, halfMs)) { aborted = true; break; }
     digitalWrite(pin, LOW);
-    if (blinkWait(io, halfMs)) { aborted = true; break; }
+    if (shellWait(io, halfMs)) { aborted = true; break; }
   }
   digitalWrite(pin, LOW);
   g_ledOn = false;

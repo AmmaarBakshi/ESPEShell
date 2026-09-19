@@ -263,6 +263,22 @@ String humanBytes(uint64_t n) {
   return String(b);
 }
 
+// Sleeps for `ms`, but returns early with true if Ctrl-C (0x03) arrives on the
+// live connection. Long-running commands (blink, watch, ping loops) call this
+// instead of delay() so they never hold the session hostage.
+bool shellWait(ShellIO &io, int ms) {
+  unsigned long start = millis();
+  for (;;) {
+    if (io.rawIn && io.rawIn->available()) {
+      int c = io.rawIn->read();
+      g_bytesIn++;
+      if (c == 0x03) return true;
+    }
+    if (millis() - start >= (unsigned long)ms) return false;
+    delay(2);
+  }
+}
+
 String expandVars(const String &s) {
   String r;
   for (size_t i = 0; i < s.length();) {

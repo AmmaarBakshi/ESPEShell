@@ -127,6 +127,7 @@ bool matchWild(const String &text, const String &pat);   // glob: * and ?
 String humanBytes(uint64_t n);
 String expandVars(const String &s);
 String toUnixEol(const String &s);   // strip CR: terminals need \r\n, files want \n
+bool   shellWait(ShellIO &io, int ms);   // delay(ms), aborting early on Ctrl-C (returns true)
 
 // ---- WiFi (net_cmds.cpp) - used at boot and by the `wifi` command ----------
 bool wifiConnect(const String &ssid, const String &pass, unsigned long timeoutMs, Print &out);
