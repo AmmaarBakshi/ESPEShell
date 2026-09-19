@@ -81,6 +81,7 @@ extern const Command TIME_CMDS[];    extern const size_t TIME_CMDS_N;
 extern const Command HASH_CMDS[];    extern const size_t HASH_CMDS_N;
 extern const Command GPIO_CMDS[];    extern const size_t GPIO_CMDS_N;
 extern const Command DIAG_CMDS[];    extern const size_t DIAG_CMDS_N;
+extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -163,6 +164,10 @@ void espeReleasePin(int pin);            // drop the claim again
 // Increments once per boot (cached after the first call); call once from
 // setup() so the count is correct even if `dmesg` is never run.
 uint32_t espeBootCount();
+
+// ---- HTTP file server (httpd_cmds.cpp) - only active after `httpd start` ---
+void httpdPoll();        // call once per main loop() iteration
+bool httpdRunning();
 
 // ---- MQTT (mqtt_cmds.cpp) - optional, needs the PubSubClient library -------
 void   mqttPoll();          // call once per main loop() iteration

@@ -320,6 +320,7 @@ static void drainMqtt() {
 void loop() {
   handleTelnet();
   handleSerial();
+  httpdPoll();     // no-op unless `httpd start` has run
   drainMqtt();
   delay(1);
 }

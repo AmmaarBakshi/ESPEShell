@@ -829,5 +829,6 @@ const CmdTable CMD_TABLES[] = {
   {HASH_CMDS, HASH_CMDS_N},
   {GPIO_CMDS, GPIO_CMDS_N},
   {DIAG_CMDS, DIAG_CMDS_N},
+  {HTTPD_CMDS, HTTPD_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);
