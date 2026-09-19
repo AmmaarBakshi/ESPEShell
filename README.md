@@ -61,7 +61,7 @@ board built around the ESP32-WROOM-32 module, no PSRAM).
 | Flash Frequency    | 80MHz                           |
 | Flash Mode         | QIO                              |
 | Flash Size         | 4MB (32Mb)                      |
-| Partition Scheme   | Default 4MB with spiffs         |
+| Partition Scheme   | **Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)** |
 | PSRAM              | Disabled                         |
 | Core Debug Level   | None                             |
 
@@ -73,9 +73,12 @@ arduino-cli compile .
 arduino-cli upload -p <PORT> .
 ```
 
-The "Default 4MB with spiffs" partition scheme includes NVS (for `wifi set`
-and `dmesg`'s boot counter) and two OTA app slots (for the `ota` command), so
-no partition changes are needed for anything in this project.
+The partition scheme matters: the firmware no longer fits the 1.31MB app slot
+of "Default 4MB with spiffs", so pick **Minimal SPIFFS** - 1.9MB per app slot,
+which still gives NVS (for `wifi set`, the timezone and `dmesg`'s boot counter)
+and two OTA slots (for the `ota` command). The trade is a smaller filesystem:
+about 190KB of LittleFS for your files. If you don't need `ota`, "No OTA (2MB
+APP/2MB SPIFFS)" swaps that back for a much larger filesystem.
 
 LittleFS is formatted automatically on first boot.
 

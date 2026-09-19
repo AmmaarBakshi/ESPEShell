@@ -3,8 +3,11 @@
 # `arduino-cli compile .` / `arduino-cli upload -p <PORT> .` need no --fqbn flag.
 #
 # Options match DevKit V1's typical 4MB flash, no PSRAM:
-#   PartitionScheme=default   -> includes OTA (ota_0/ota_1) + nvs + a data partition
+#   PartitionScheme=min_spiffs -> 1.9MB per app slot, still OTA (ota_0/ota_1) +
+#                                 nvs + a ~190KB data partition for LittleFS.
+#                                 The default 1.31MB app slot is too small for
+#                                 this firmware now (WebServer, mbedtls, SNTP).
 #   FlashMode=qio, FlashFreq=80, FlashSize=4M
 #   UploadSpeed=921600        -> standard for the CP2102/CH340 USB-UART on this board
 # Arduino IDE users: see README.md for the equivalent Tools-menu settings.
-default_fqbn: esp32:esp32:esp32:PartitionScheme=default,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none
+default_fqbn: esp32:esp32:esp32:PartitionScheme=min_spiffs,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none
