@@ -124,6 +124,54 @@ static int cmd_cd(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- directory stack -------------------------------------------------------
+// One stack for the whole shell, not per-session: the cwd it pushes is global
+// too (see g_cwd), so a per-session stack would just drift out of sync.
+static std::vector<String> g_dirStack;
+
+static void printDirStack(Print &out) {
+  out.print(g_cwd);
+  for (size_t i = g_dirStack.size(); i-- > 0; ) { out.print(' '); out.print(g_dirStack[i]); }
+  out.println();
+}
+
+static int cmd_pushd(int argc, char **argv, ShellIO &io) {
+  String tgt = argAt(argc, argv, 0);
+  if (tgt.length() == 0) {   // bare pushd swaps the top of the stack with the cwd
+    if (g_dirStack.empty()) { io.out.println(F("pushd: directory stack empty")); return 1; }
+    String top = g_dirStack.back();
+    if (!isDir(top)) { io.out.print(top); io.out.println(F(": not a directory")); return 1; }
+    g_dirStack.back() = g_cwd;
+    g_cwd = top;
+    printDirStack(io.out);
+    return 0;
+  }
+  String abs = resolvePath(tgt);
+  if (!isDir(abs)) { io.out.print(tgt); io.out.println(F(": not a directory")); return 1; }
+  g_dirStack.push_back(g_cwd);
+  g_cwd = abs;
+  printDirStack(io.out);
+  return 0;
+}
+
+static int cmd_popd(int argc, char **argv, ShellIO &io) {
+  (void)argc; (void)argv;
+  if (g_dirStack.empty()) { io.out.println(F("popd: directory stack empty")); return 1; }
+  String top = g_dirStack.back();
+  g_dirStack.pop_back();
+  // The directory may have been removed while it sat on the stack.
+  if (isDir(top)) g_cwd = top;
+  else { io.out.print(top); io.out.println(F(": no longer a directory, staying put")); }
+  printDirStack(io.out);
+  return 0;
+}
+
+static int cmd_dirs(int argc, char **argv, ShellIO &io) {
+  if (hasFlag(argc, argv, 'c')) { g_dirStack.clear(); return 0; }
+  printDirStack(io.out);
+  return 0;
+}
+
 static int cmd_ls(int argc, char **argv, ShellIO &io) {
   bool lng = hasFlag(argc, argv, 'l');
   bool all = hasFlag(argc, argv, 'a');
@@ -390,6 +438,9 @@ static int cmd_noperm(int argc, char **argv, ShellIO &io) {
 const Command FS_CMDS[] = {
   {"pwd",      cmd_pwd,      "pwd",                 "print working directory",             G_FS},
   {"cd",       cmd_cd,       "cd [dir]",            "change directory",                    G_FS},
+  {"pushd",    cmd_pushd,    "pushd [dir]",         "cd, saving the old dir on a stack",   G_FS},
+  {"popd",     cmd_popd,     "popd",                "cd back to the top of the stack",     G_FS},
+  {"dirs",     cmd_dirs,     "dirs [-c]",           "show (or clear) the directory stack", G_FS},
   {"ls",       cmd_ls,       "ls [-l] [-a] [path]", "list directory contents",             G_FS},
   {"mkdir",    cmd_mkdir,    "mkdir [-p] dir...",   "create directories",                  G_FS},
   {"rmdir",    cmd_rmdir,    "rmdir dir...",        "remove empty directories",            G_FS},
