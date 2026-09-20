@@ -32,6 +32,11 @@
 #define ESPE_ONBOARD_LED_PIN  2   // most DevKit V1 boards: onboard blue LED
 #define ESPE_BOOT_BUTTON_PIN  0   // the "BOOT" button (also a strapping pin)
 
+// Where `rgb` looks for a WS2812/NeoPixel by default. The plain DevKit V1 has
+// no addressable LED, so this is only a starting point for a wired-up strip;
+// boards that do have one (S3 DevKit, C3 Zero) usually put it on GPIO48 or 8.
+#define ESPE_RGB_LED_PIN      48
+
 // ---- Persistent storage (NVS, via Preferences) -----------------------------
 // Namespace used for settings that should survive a reboot / reflash without
 // being recompiled in, e.g. WiFi credentials set at runtime with `wifi set`.
