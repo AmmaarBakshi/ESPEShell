@@ -426,34 +426,40 @@ static int cmd_ap(int argc, char **argv, ShellIO &io) {
 }
 
 // ---- mac -------------------------------------------------------------------
-// The four interface MACs are all derived from the one base address burned
-// into eFuse, so `mac -b` is the number that actually identifies the chip.
-static void macLine(ShellIO &io, const char *label, esp_mac_type_t t) {
+// Every interface MAC is derived from the one base address burned into eFuse,
+// so `mac -b` is the number that actually identifies this chip.
+static String macFormat(const uint8_t m[6]) {
+  char b[18];
+  snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+  return String(b);
+}
+
+static void macLine(ShellIO &io, const char *label, esp_mac_type_t type) {
   uint8_t m[6] = {0};
-  if (esp_read_mac(m, t) != ESP_OK) return;
-  io.out.printf("%-9s %02X:%02X:%02X:%02X:%02X:%02X
-", label, m[0], m[1], m[2], m[3], m[4], m[5]);
+  if (esp_read_mac(m, type) != ESP_OK) return;   // interface absent on this chip
+  char b[40];
+  snprintf(b, sizeof(b), "%-9s %s", label, macFormat(m).c_str());
+  io.out.println(b);
 }
 
 static int cmd_mac(int argc, char **argv, ShellIO &io) {
-  bool base = false;
+  bool baseOnly = false;
   for (int i = 1; i < argc; ++i) {
     String a = argv[i];
-    if (a == "-b" || a == "--base") base = true;
+    if (a == "-b" || a == "--base") baseOnly = true;
     else { io.out.print(a); io.out.println(F(": unknown option")); return 1; }
   }
-  uint8_t m[6] = {0};
-  esp_efuse_mac_get_default(m);
-  if (base) {
-    io.out.printf("%02X:%02X:%02X:%02X:%02X:%02X
-", m[0], m[1], m[2], m[3], m[4], m[5]);
-    return 0;
-  }
-  io.out.printf("%-9s %02X:%02X:%02X:%02X:%02X:%02X
-", "base", m[0], m[1], m[2], m[3], m[4], m[5]);
+
+  uint8_t base[6] = {0};
+  esp_efuse_mac_get_default(base);
+  if (baseOnly) { io.out.println(macFormat(base)); return 0; }
+
+  char b[40];
+  snprintf(b, sizeof(b), "%-9s %s", "base", macFormat(base).c_str());
+  io.out.println(b);
   macLine(io, "wifi-sta", ESP_MAC_WIFI_STA);
-  macLine(io, "wifi-ap", ESP_MAC_WIFI_SOFTAP);
-  macLine(io, "bt", ESP_MAC_BT);
+  macLine(io, "wifi-ap",  ESP_MAC_WIFI_SOFTAP);
+  macLine(io, "bt",       ESP_MAC_BT);
   macLine(io, "ethernet", ESP_MAC_ETH);
   return 0;
 }
