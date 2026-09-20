@@ -287,16 +287,35 @@ bool collectInput(int argc, char **argv, int firstFileArg, ShellIO &io, String &
   return any;
 }
 
+// Splits on LF, stripping CR. Slices with substring() rather than appending
+// character by character, and pre-sizes the vector, so a large piped buffer
+// costs one pass instead of a realloc every 16 bytes and a regrow every few
+// lines. Behaviour is unchanged: a trailing LF does not yield an empty line.
 void splitLines(const String &s, std::vector<String> &lines) {
   lines.clear();
-  String cur;
-  for (size_t i = 0; i < s.length(); ++i) {
-    char c = s[i];
-    if (c == '\n') { lines.push_back(cur); cur = ""; }
-    else if (c == '\r') { /* strip */ }
-    else cur += c;
+  const int n = (int)s.length();
+  if (n == 0) return;
+
+  size_t count = 1;
+  for (int i = 0; i < n; ++i)
+    if (s[i] == '\n') count++;
+  lines.reserve(count);
+
+  int start = 0;
+  for (int i = 0; i <= n; ++i) {
+    if (i != n && s[i] != '\n') continue;
+    if (i == n && i == start) break;          // trailing LF: no empty last line
+    String line = s.substring(start, i);
+    if (line.indexOf('\r') >= 0) {            // CRLF input, or a stray bare CR
+      String clean;
+      clean.reserve(line.length());
+      for (unsigned k = 0; k < line.length(); ++k)
+        if (line[k] != '\r') clean.concat(line[k]);
+      line = clean;
+    }
+    lines.push_back(line);
+    start = i + 1;
   }
-  if (cur.length()) lines.push_back(cur);
 }
 
 bool matchWild(const String &t, const String &p) {
@@ -341,6 +360,7 @@ bool shellWait(ShellIO &io, int ms) {
 
 String expandVars(const String &s) {
   String r;
+  r.reserve(s.length());   // the common case is a line with no substitutions
   for (size_t i = 0; i < s.length();) {
     char c = s[i];
     if (c == '$' && i + 1 < s.length()) {
