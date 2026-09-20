@@ -431,6 +431,7 @@ const char *groupName(uint8_t g) {
     case G_ESP:     return "ESP32 specific";
     case G_CORE:    return "Shell built-ins";
     case G_XFER:    return "File transfer";
+    case G_HOST:    return "Host laptop (bridge)";
     default:        return "Other";
   }
 }
@@ -878,5 +879,6 @@ const CmdTable CMD_TABLES[] = {
   {DIAG_CMDS, DIAG_CMDS_N},
   {HTTPD_CMDS, HTTPD_CMDS_N},
   {CRON_CMDS, CRON_CMDS_N},
+  {HOST_CMDS, HOST_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);

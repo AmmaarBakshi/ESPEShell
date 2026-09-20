@@ -45,5 +45,12 @@
 #define MQTT_BROKER_HOST  ""
 #define MQTT_BROKER_PORT  1883
 
+// ---- Host bridge (tools/espehost.py on the laptop) -------------------------
+// The agent connects TO this port on the ESP32; the ESP32 never dials out.
+// See host_cmds.cpp for the protocol and the reasoning.
+#define HOST_BRIDGE_PORT       2323
+#define HOST_BRIDGE_TIMEOUT_MS 5000    // per-request wait before giving up
+#define HOST_BRIDGE_LINE_MAX   8192    // longest reply line we will buffer
+
 // ---- Version ---------------------------------------------------------------
 #define ESPE_VERSION    "0.3.0"

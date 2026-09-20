@@ -48,6 +48,7 @@ enum {
   G_ESP,
   G_CORE,
   G_XFER,
+  G_HOST,
   G_COUNT
 };
 
@@ -83,6 +84,7 @@ extern const Command GPIO_CMDS[];    extern const size_t GPIO_CMDS_N;
 extern const Command DIAG_CMDS[];    extern const size_t DIAG_CMDS_N;
 extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
 extern const Command CRON_CMDS[];    extern const size_t CRON_CMDS_N;
+extern const Command HOST_CMDS[];    extern const size_t HOST_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -185,6 +187,24 @@ bool httpdRunning();
 // ---- Background jobs (cron_cmds.cpp) - the `every` command ----------------
 bool   cronPopDue(String &line);   // next due job line, false if nothing is due
 size_t cronJobCount();
+
+// ---- Host bridge (host_cmds.cpp) - the laptop agent, tools/espehost.py -----
+void   hostBridgeBegin();     // start listening; called once from setup()
+void   hostBridgePoll();      // call once per main loop() iteration
+bool   hostConnected();
+String hostPeer();            // agent's IP, or "" when nothing is connected
+bool   hostPopEvent(String &text);   // unsolicited agent messages, oldest first
+
+// Ask the agent one question and wait for its answer. On success `text` is the
+// agent's formatted reply; on failure it is the reason. `val`, when non-null,
+// receives the machine-readable scalar the agent sent alongside (0 if none).
+bool hostAsk(const String &op, const String &args, String &text,
+             double *val, uint32_t timeoutMs);
+bool hostAskNumber(const String &op, const String &args, double &value);
+
+// Body shared by every h* command: ask `op`, print the reply. Arguments from
+// argv[firstArg] on are passed to the agent verbatim.
+int  hostRun(const String &op, int argc, char **argv, int firstArg, ShellIO &io);
 
 // ---- MQTT (mqtt_cmds.cpp) - optional, needs the PubSubClient library -------
 void   mqttPoll();          // call once per main loop() iteration

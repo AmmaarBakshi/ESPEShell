@@ -281,6 +281,7 @@ void setup() {
 
   telnetServer.begin();
   telnetServer.setNoDelay(true);
+  hostBridgeBegin();   // laptop agent connects in on HOST_BRIDGE_PORT
 
   CountingPrint cp(Serial);
   printBanner(cp);
@@ -341,11 +342,33 @@ static void drainCron() {
   }
 }
 
+// Unsolicited messages pushed by the laptop agent (a camera saw motion, the
+// battery crossed a threshold). Same treatment as MQTT: print, then put the
+// half-typed line back.
+static void drainHost() {
+  hostBridgePoll();
+  String text;
+  while (hostPopEvent(text)) {
+    CountingPrint scp(Serial);
+    scp.println();
+    scp.print(F("[host] ")); scp.println(text);
+    redrawLine(scp, serSt.line);
+
+    if (telnetClient && telnetClient.connected() && tnState == T_SHELL) {
+      CountingPrint tcp(telnetClient);
+      tcp.println();
+      tcp.print(F("[host] ")); tcp.println(text);
+      redrawLine(tcp, tnSt.line);
+    }
+  }
+}
+
 void loop() {
   handleTelnet();
   handleSerial();
   httpdPoll();     // no-op unless `httpd start` has run
   drainCron();
   drainMqtt();
+  drainHost();     // no-op unless the laptop agent is connected
   delay(1);
 }
