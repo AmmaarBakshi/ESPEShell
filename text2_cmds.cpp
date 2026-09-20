@@ -5,34 +5,10 @@
 // ============================================================================
 //  Text utilities, part two - the line-and-column tools.
 //
-//  Everything here reads piped stdin when there is one and named files
-//  otherwise, via collectInput(), so all of it composes with pipes.
+//  Argument handling goes through ArgScan so that a flag's value is never
+//  mistaken for an operand: `truncate -s 100 file` has one operand, and
+//  `expand -t 4 file` reads one file rather than trying to open "4".
 // ============================================================================
-
-// Reads the operand at non-flag position `n` (0-based), or "" if absent.
-static String operandAt(int argc, char **argv, int n) {
-  int k = 0;
-  for (int i = 1; i < argc; ++i) {
-    if (argv[i][0] == '-' && argv[i][1] != 0) continue;
-    if (k == n) return String(argv[i]);
-    k++;
-  }
-  return String("");
-}
-
-static bool hasFlag2(int argc, char **argv, char f) {
-  for (int i = 1; i < argc; ++i)
-    if (argv[i][0] == '-' && argv[i][1] != '-')
-      for (const char *p = argv[i] + 1; *p; ++p)
-        if (*p == f) return true;
-  return false;
-}
-
-static int intOpt(int argc, char **argv, const char *flag, int fallback) {
-  for (int i = 1; i + 1 < argc; ++i)
-    if (strcmp(argv[i], flag) == 0) return atoi(argv[i + 1]);
-  return fallback;
-}
 
 // Loads one file's lines. Reports through `io` and returns false on failure.
 static bool fileLines(const String &name, ShellIO &io, std::vector<String> &out) {
@@ -46,17 +22,17 @@ static bool fileLines(const String &name, ShellIO &io, std::vector<String> &out)
 // Three columns: only in file1, only in file2, in both. Like the real thing,
 // this assumes both inputs are already sorted - it is a merge, not a diff.
 static int cmd_comm(int argc, char **argv, ShellIO &io) {
-  String f1 = operandAt(argc, argv, 0), f2 = operandAt(argc, argv, 1);
-  if (f1.length() == 0 || f2.length() == 0) {
+  ArgScan args(argc, argv);
+  if (args.count() < 2) {
     io.out.println(F("usage: comm [-123] file1 file2   (both must be sorted)"));
     return 1;
   }
   std::vector<String> a, b;
-  if (!fileLines(f1, io, a) || !fileLines(f2, io, b)) return 1;
+  if (!fileLines(args.at(0), io, a) || !fileLines(args.at(1), io, b)) return 1;
 
-  const bool hide1 = hasFlag2(argc, argv, '1');
-  const bool hide2 = hasFlag2(argc, argv, '2');
-  const bool hide3 = hasFlag2(argc, argv, '3');
+  const bool hide1 = args.letter('1');
+  const bool hide2 = args.letter('2');
+  const bool hide3 = args.letter('3');
   // Column N is indented by one tab for each shown column before it.
   const String pad2 = hide1 ? "" : "\t";
   const String pad3 = String(hide1 ? "" : "\t") + (hide2 ? "" : "\t");
@@ -79,27 +55,25 @@ static int cmd_comm(int argc, char **argv, ShellIO &io) {
 
 // ---- join ------------------------------------------------------------------
 static int cmd_join(int argc, char **argv, ShellIO &io) {
-  String f1 = operandAt(argc, argv, 0), f2 = operandAt(argc, argv, 1);
-  if (f1.length() == 0 || f2.length() == 0) {
+  ArgScan args(argc, argv, "-t");
+  if (args.count() < 2) {
     io.out.println(F("usage: join [-t C] file1 file2   (joins on the first field)"));
     return 1;
   }
-  char sep = ' ';
-  for (int i = 1; i + 1 < argc; ++i)
-    if (strcmp(argv[i], "-t") == 0 && argv[i + 1][0]) sep = argv[i + 1][0];
+  const String sepArg = args.value("-t", " ");
+  const char sep = sepArg.length() ? sepArg[0] : ' ';
 
   std::vector<String> a, b;
-  if (!fileLines(f1, io, a) || !fileLines(f2, io, b)) return 1;
+  if (!fileLines(args.at(0), io, a) || !fileLines(args.at(1), io, b)) return 1;
 
   for (auto &la : a) {
-    int ka = la.indexOf(sep);
-    String key = (ka < 0) ? la : la.substring(0, ka);
-    String resta = (ka < 0) ? String("") : la.substring(ka + 1);
+    const int ka = la.indexOf(sep);
+    const String key   = (ka < 0) ? la : la.substring(0, ka);
+    const String resta = (ka < 0) ? String("") : la.substring(ka + 1);
     for (auto &lb : b) {
-      int kb = lb.indexOf(sep);
-      String keyb = (kb < 0) ? lb : lb.substring(0, kb);
-      if (keyb != key) continue;
-      String restb = (kb < 0) ? String("") : lb.substring(kb + 1);
+      const int kb = lb.indexOf(sep);
+      if (((kb < 0) ? lb : lb.substring(0, kb)) != key) continue;
+      const String restb = (kb < 0) ? String("") : lb.substring(kb + 1);
       io.out.print(key);
       if (resta.length()) { io.out.print(sep); io.out.print(resta); }
       if (restb.length()) { io.out.print(sep); io.out.print(restb); }
@@ -111,9 +85,12 @@ static int cmd_join(int argc, char **argv, ShellIO &io) {
 
 // ---- expand / unexpand -----------------------------------------------------
 static int expandTabs(int argc, char **argv, ShellIO &io, bool toSpaces) {
-  const int width = intOpt(argc, argv, "-t", 8) > 0 ? intOpt(argc, argv, "-t", 8) : 8;
+  ArgScan args(argc, argv, "-t");
+  long width = args.number("-t", 8);
+  if (width < 1) width = 8;
+
   String data;
-  if (!collectInput(argc, argv, 1, io, data)) return 0;
+  if (!collectOperands(args, 0, io, data)) return 0;
   std::vector<String> lines;
   splitLines(data, lines);
 
@@ -124,18 +101,19 @@ static int expandTabs(int argc, char **argv, ShellIO &io, bool toSpaces) {
       for (unsigned i = 0; i < line.length(); ++i) {
         if (line[i] != '\t') { out.concat(line[i]); continue; }
         // A tab advances to the next multiple of `width`, not by `width`.
-        int pad = width - (out.length() % width);
+        long pad = width - (out.length() % width);
         while (pad-- > 0) out.concat(' ');
       }
     } else {
       // Only leading whitespace is converted; runs inside a line are data.
-      unsigned i = 0, col = 0;
+      unsigned i = 0;
+      long col = 0;
       while (i < line.length() && (line[i] == ' ' || line[i] == '\t')) {
         col = (line[i] == '\t') ? (col / width + 1) * width : col + 1;
         i++;
       }
-      for (unsigned t = 0; t < col / width; ++t) out.concat('\t');
-      for (unsigned sp = 0; sp < col % width; ++sp) out.concat(' ');
+      for (long t = 0; t < col / width; ++t) out.concat('\t');
+      for (long sp = 0; sp < col % width; ++sp) out.concat(' ');
       out.concat(line.substring(i));
     }
     io.out.println(out);
@@ -149,12 +127,12 @@ static int cmd_unexpand(int argc, char **argv, ShellIO &io) { return expandTabs(
 // ---- column ----------------------------------------------------------------
 // Aligns whitespace- (or -s) separated fields into columns, sized to content.
 static int cmd_column(int argc, char **argv, ShellIO &io) {
-  char sep = 0;
-  for (int i = 1; i + 1 < argc; ++i)
-    if (strcmp(argv[i], "-s") == 0 && argv[i + 1][0]) sep = argv[i + 1][0];
+  ArgScan args(argc, argv, "-s");
+  const String sepArg = args.value("-s");
+  const char sep = sepArg.length() ? sepArg[0] : 0;
 
   String data;
-  if (!collectInput(argc, argv, 1, io, data)) return 0;
+  if (!collectOperands(args, 0, io, data)) return 0;
   std::vector<String> lines;
   splitLines(data, lines);
 
@@ -202,16 +180,17 @@ static int cmd_column(int argc, char **argv, ShellIO &io) {
 }
 
 // ---- sponge ----------------------------------------------------------------
-// Reads all of stdin before opening the file, so `cat f | sponge f` works
-// where `cat f > f` would truncate f before cat ever read it.
+// Reads all of stdin before opening the file, so `sort f | sponge f` works
+// where `sort f > f` would truncate f before sort ever read it.
 static int cmd_sponge(int argc, char **argv, ShellIO &io) {
-  if (argc < 2) { io.out.println(F("usage: <command> | sponge <file>")); return 1; }
+  ArgScan args(argc, argv);
+  if (args.count() < 1) { io.out.println(F("usage: <command> | sponge <file>")); return 1; }
   if (!io.hasIn()) { io.out.println(F("sponge: nothing on stdin")); return 1; }
 
-  String data = *io.in;              // fully buffered before the open below
-  File f = LittleFS.open(resolvePath(argv[1]), "w");
-  if (!f) { io.out.print(argv[1]); io.out.println(F(": cannot open for writing")); return 1; }
-  String unix = toUnixEol(data);
+  const String data = *io.in;        // fully buffered before the open below
+  File f = LittleFS.open(resolvePath(args.at(0)), "w");
+  if (!f) { io.out.print(args.at(0)); io.out.println(F(": cannot open for writing")); return 1; }
+  const String unix = toUnixEol(data);
   f.write((const uint8_t *)unix.c_str(), unix.length());
   f.close();
   return 0;
@@ -219,24 +198,25 @@ static int cmd_sponge(int argc, char **argv, ShellIO &io) {
 
 // ---- truncate ---------------------------------------------------------------
 static int cmd_truncate(int argc, char **argv, ShellIO &io) {
-  const int size = intOpt(argc, argv, "-s", -1);
-  String name = operandAt(argc, argv, 0);
-  if (name.length() == 0 || size < 0) {
+  ArgScan args(argc, argv, "-s");
+  const long size = args.number("-s", -1);
+  if (args.count() < 1 || size < 0) {
     io.out.println(F("usage: truncate -s <bytes> <file>"));
     return 1;
   }
-  String abs = resolvePath(name);
+  const String name = args.at(0);
+  const String abs = resolvePath(name);
 
   String data;
   if (pathExists(abs) && !readFileToString(abs, data, &io.out, name.c_str())) return 1;
 
   File f = LittleFS.open(abs, "w");
   if (!f) { io.out.print(name); io.out.println(F(": cannot open for writing")); return 1; }
-  if ((int)data.length() >= size) {
+  if ((long)data.length() >= size) {
     f.write((const uint8_t *)data.c_str(), size);
   } else {
     f.write((const uint8_t *)data.c_str(), data.length());
-    for (int i = data.length(); i < size; ++i) f.write((uint8_t)0);   // grow with NULs
+    for (long i = data.length(); i < size; ++i) f.write((uint8_t)0);   // grow with NULs
   }
   f.close();
   return 0;
@@ -244,26 +224,27 @@ static int cmd_truncate(int argc, char **argv, ShellIO &io) {
 
 // ---- readlink ---------------------------------------------------------------
 static int cmd_readlink(int argc, char **argv, ShellIO &io) {
-  if (argc < 2) { io.out.println(F("usage: readlink [-f] <path>")); return 1; }
-  String name = operandAt(argc, argv, 0);
-  String abs = resolvePath(name);
+  ArgScan args(argc, argv);
+  if (args.count() < 1) { io.out.println(F("usage: readlink [-f] <path>")); return 1; }
   // LittleFS has no symlinks, so every path is already its own target. With
   // -f that is exactly realpath; without it, the honest answer is "not a link".
-  if (hasFlag2(argc, argv, 'f')) { io.out.println(abs); return 0; }
-  io.out.print(name);
+  if (args.letter('f')) { io.out.println(resolvePath(args.at(0))); return 0; }
+  io.out.print(args.at(0));
   io.out.println(F(": not a symbolic link (LittleFS has none)"));
   return 1;
 }
 
-// ---- head -c / tail -c style byte slicing ----------------------------------
+// ---- bytes : slice input by byte offset --------------------------------------
 static int cmd_bytes(int argc, char **argv, ShellIO &io) {
-  const int from = intOpt(argc, argv, "-f", 0);
-  const int count = intOpt(argc, argv, "-n", -1);
+  ArgScan args(argc, argv, "-f -n");
+  const long from = args.number("-f", 0);
+  const long count = args.number("-n", -1);
+
   String data;
-  if (!collectInput(argc, argv, 1, io, data)) return 0;
-  if (from >= (int)data.length()) return 0;
-  int end = (count < 0) ? data.length() : from + count;
-  if (end > (int)data.length()) end = data.length();
+  if (!collectOperands(args, 0, io, data)) return 0;
+  if (from >= (long)data.length() || from < 0) return 0;
+  long end = (count < 0) ? (long)data.length() : from + count;
+  if (end > (long)data.length()) end = data.length();
   io.out.print(data.substring(from, end));
   return 0;
 }

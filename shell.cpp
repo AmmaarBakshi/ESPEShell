@@ -231,6 +231,67 @@ String completeLine(const String &partial, Print &out) {
 // ============================================================================
 //  Shared command helpers
 // ============================================================================
+// ============================================================================
+//  Argument scanning
+// ============================================================================
+static bool flagTakesValue(const String &flag, const char *valueFlags) {
+  if (!valueFlags || !*valueFlags) return false;
+  // Match on whole words so "-n" does not match inside "--name".
+  String haystack = String(" ") + valueFlags + " ";
+  return haystack.indexOf(String(" ") + flag + " ") >= 0;
+}
+
+ArgScan::ArgScan(int argc, char **argv, const char *valueFlags) {
+  for (int i = 1; i < argc; ++i) {
+    String tok = argv[i];
+    // A lone "-" means stdin, not a flag.
+    if (tok.length() > 1 && tok[0] == '-') {
+      flags.push_back(tok);
+      if (flagTakesValue(tok, valueFlags) && i + 1 < argc)
+        pairs.push_back(std::make_pair(tok, String(argv[++i])));
+      continue;
+    }
+    operands.push_back(tok);
+  }
+}
+
+bool ArgScan::has(const char *flag) const {
+  for (auto &f : flags) if (f == flag) return true;
+  return false;
+}
+
+bool ArgScan::letter(char c) const {
+  for (auto &f : flags) {
+    if (f.length() < 2 || f[1] == '-') continue;   // long flags are not bundles
+    for (unsigned i = 1; i < f.length(); ++i) if (f[i] == c) return true;
+  }
+  return false;
+}
+
+String ArgScan::value(const char *flag, const String &fallback) const {
+  for (auto &kv : pairs) if (kv.first == flag) return kv.second;
+  return fallback;
+}
+
+long ArgScan::number(const char *flag, long fallback) const {
+  for (auto &kv : pairs) if (kv.first == flag) return atol(kv.second.c_str());
+  return fallback;
+}
+
+bool collectOperands(const ArgScan &args, size_t firstOperand, ShellIO &io, String &out) {
+  out = "";
+  if (io.hasIn()) { out = *io.in; return true; }
+  bool any = false;
+  for (size_t i = firstOperand; i < args.operands.size(); ++i) {
+    String chunk;
+    if (!readFileToString(resolvePath(args.operands[i]), chunk, &io.out,
+                          args.operands[i].c_str())) continue;
+    out += chunk;
+    any = true;
+  }
+  return any;
+}
+
 bool readFileToString(const String &abs, String &out, Print *err, const char *label) {
   out = "";
   const char *name = label ? label : abs.c_str();

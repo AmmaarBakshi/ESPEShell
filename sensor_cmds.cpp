@@ -10,22 +10,6 @@
 //  accuracy, which matters: the notes on each command say where it is tight.
 // ============================================================================
 
-static int argInt(int argc, char **argv, int n, int fallback) {
-  int k = 0;
-  for (int i = 1; i < argc; ++i) {
-    if (argv[i][0] == '-' && !isdigit((int)argv[i][1])) continue;
-    if (k == n) return atoi(argv[i]);
-    k++;
-  }
-  return fallback;
-}
-
-static int intFlag(int argc, char **argv, const char *flag, int fallback) {
-  for (int i = 1; i + 1 < argc; ++i)
-    if (strcmp(argv[i], flag) == 0) return atoi(argv[i + 1]);
-  return fallback;
-}
-
 static bool checkPin(int pin, ShellIO &io) {
   if (!espePinUsable(pin)) {
     io.out.print(F("pin "));
@@ -77,10 +61,11 @@ static bool dhtRead(int pin, uint8_t out[5]) {
 }
 
 static int cmd_dht(int argc, char **argv, ShellIO &io) {
-  int pin = argInt(argc, argv, 0, -1);
-  if (pin < 0) { io.out.println(F("usage: dht <pin> [-11|-22]   (default: DHT22)")); return 1; }
+  ArgScan args(argc, argv);
+  const int pin = args.count() ? args.at(0).toInt() : -1;
+  if (args.count() == 0) { io.out.println(F("usage: dht <pin> [-11|-22]   (default: DHT22)")); return 1; }
   if (!checkPin(pin, io)) return 1;
-  const bool dht11 = (strstr(argv[argc - 1], "11") != nullptr) && argc > 2;
+  const bool dht11 = args.has("-11");
 
   uint8_t raw[5] = {0};
   bool ok = false;
@@ -111,15 +96,16 @@ static int cmd_dht(int argc, char **argv, ShellIO &io) {
 
 // ---- sonar : HC-SR04 ---------------------------------------------------------
 static int cmd_sonar(int argc, char **argv, ShellIO &io) {
-  int trig = argInt(argc, argv, 0, -1);
-  int echo = argInt(argc, argv, 1, -1);
-  if (trig < 0 || echo < 0) {
+  ArgScan args(argc, argv, "-n");
+  const int trig = args.count() > 0 ? args.at(0).toInt() : -1;
+  const int echo = args.count() > 1 ? args.at(1).toInt() : -1;
+  if (args.count() < 2) {
     io.out.println(F("usage: sonar <trig-pin> <echo-pin> [-n N]"));
     io.out.println(F("note: HC-SR04 echo is 5V - use a divider into the ESP32"));
     return 1;
   }
   if (!checkPin(trig, io) || !checkPin(echo, io)) return 1;
-  const int samples = intFlag(argc, argv, "-n", 1);
+  const int samples = (int)args.number("-n", 1);
 
   pinMode(trig, OUTPUT);
   pinMode(echo, INPUT);
@@ -144,11 +130,12 @@ static int cmd_sonar(int argc, char **argv, ShellIO &io) {
 
 // ---- pulse : raw pulseIn -----------------------------------------------------
 static int cmd_pulse(int argc, char **argv, ShellIO &io) {
-  int pin = argInt(argc, argv, 0, -1);
-  if (pin < 0) { io.out.println(F("usage: pulse <pin> [-low] [-t ms]")); return 1; }
+  ArgScan args(argc, argv, "-t");
+  if (args.count() == 0) { io.out.println(F("usage: pulse <pin> [-low] [-t ms]")); return 1; }
+  const int pin = args.at(0).toInt();
   if (!checkPin(pin, io)) return 1;
-  const bool low = (strstr(argv[argc - 1], "low") != nullptr);
-  const unsigned long timeoutUs = (unsigned long)intFlag(argc, argv, "-t", 1000) * 1000UL;
+  const bool low = args.has("-low");
+  const unsigned long timeoutUs = (unsigned long)args.number("-t", 1000) * 1000UL;
 
   pinMode(pin, INPUT);
   unsigned long us = pulseIn(pin, low ? LOW : HIGH, timeoutUs);
@@ -162,10 +149,11 @@ static int cmd_pulse(int argc, char **argv, ShellIO &io) {
 // 100 kHz before sampling starts losing edges, which is fine for a tachometer
 // or a 50/60 Hz mains probe and not fine for anything faster.
 static int cmd_freq(int argc, char **argv, ShellIO &io) {
-  int pin = argInt(argc, argv, 0, -1);
-  if (pin < 0) { io.out.println(F("usage: freq <pin> [-t ms]   (polled, good to ~100 kHz)")); return 1; }
+  ArgScan args(argc, argv, "-t");
+  if (args.count() == 0) { io.out.println(F("usage: freq <pin> [-t ms]   (polled, good to ~100 kHz)")); return 1; }
+  const int pin = args.at(0).toInt();
   if (!checkPin(pin, io)) return 1;
-  const unsigned long windowMs = (unsigned long)intFlag(argc, argv, "-t", 1000);
+  const unsigned long windowMs = (unsigned long)args.number("-t", 1000);
 
   pinMode(pin, INPUT);
   unsigned long edges = 0;
@@ -185,15 +173,16 @@ static int cmd_freq(int argc, char **argv, ShellIO &io) {
 
 // ---- scope : ASCII plot of an analog pin -------------------------------------
 static int cmd_scope(int argc, char **argv, ShellIO &io) {
-  int pin = argInt(argc, argv, 0, -1);
-  if (pin < 0) {
+  ArgScan args(argc, argv, "-n -d -h");
+  if (args.count() == 0) {
     io.out.println(F("usage: scope <adc-pin> [-n samples] [-d us] [-h rows]"));
     return 1;
   }
+  const int pin = args.at(0).toInt();
   if (!checkPin(pin, io)) return 1;
-  int samples = intFlag(argc, argv, "-n", 64);
-  int rows    = intFlag(argc, argv, "-h", 12);
-  const int gapUs = intFlag(argc, argv, "-d", 1000);
+  int samples = (int)args.number("-n", 64);
+  int rows    = (int)args.number("-h", 12);
+  const int gapUs = (int)args.number("-d", 1000);
   if (samples < 2) samples = 2;
   if (samples > 160) samples = 160;      // one screen wide, transposed below
   if (rows < 4) rows = 4;
@@ -230,9 +219,12 @@ static int cmd_scope(int argc, char **argv, ShellIO &io) {
 
 // ---- logic : multi-pin digital sampler ---------------------------------------
 static int cmd_logic(int argc, char **argv, ShellIO &io) {
+  // ArgScan knows -n and -d consume the next argument, so their values are
+  // not mistaken for extra pins.
+  ArgScan args(argc, argv, "-n -d");
   std::vector<int> pins;
-  for (int i = 1; i < argc; ++i)
-    if (isdigit((int)argv[i][0])) pins.push_back(atoi(argv[i]));
+  for (auto &operand : args.operands)
+    if (operand.length() && isdigit((int)operand[0])) pins.push_back(operand.toInt());
   if (pins.empty()) {
     io.out.println(F("usage: logic <pin> [pin...] [-n samples] [-d us]"));
     return 1;
@@ -240,8 +232,8 @@ static int cmd_logic(int argc, char **argv, ShellIO &io) {
   if (pins.size() > 8) { io.out.println(F("logic: 8 pins maximum")); return 1; }
   for (int p : pins) if (!checkPin(p, io)) return 1;
 
-  int samples = intFlag(argc, argv, "-n", 64);
-  const int gapUs = intFlag(argc, argv, "-d", 100);
+  int samples = (int)args.number("-n", 64);
+  const int gapUs = (int)args.number("-d", 100);
   if (samples < 2) samples = 2;
   if (samples > 200) samples = 200;
 
@@ -280,16 +272,17 @@ static int cmd_logic(int argc, char **argv, ShellIO &io) {
 
 // ---- shiftout : 74HC595 and friends ------------------------------------------
 static int cmd_shiftout(int argc, char **argv, ShellIO &io) {
-  int dataPin = argInt(argc, argv, 0, -1);
-  int clockPin = argInt(argc, argv, 1, -1);
-  int latchPin = argInt(argc, argv, 2, -1);
-  int value = argInt(argc, argv, 3, -1);
-  if (dataPin < 0 || clockPin < 0 || latchPin < 0 || value < 0) {
+  ArgScan args(argc, argv);
+  if (args.count() < 4) {
     io.out.println(F("usage: shiftout <data> <clock> <latch> <value> [-lsb]"));
     return 1;
   }
+  const int dataPin  = args.at(0).toInt();
+  const int clockPin = args.at(1).toInt();
+  const int latchPin = args.at(2).toInt();
+  const int value    = args.at(3).toInt();
   for (int p : {dataPin, clockPin, latchPin}) if (!checkPin(p, io)) return 1;
-  const bool lsb = (strstr(argv[argc - 1], "lsb") != nullptr);
+  const bool lsb = args.has("-lsb");
 
   pinMode(dataPin, OUTPUT);
   pinMode(clockPin, OUTPUT);
@@ -309,17 +302,18 @@ static int cmd_rgb(int argc, char **argv, ShellIO &io) {
     io.out.println(F("drives one WS2812/NeoPixel (0-255 each)"));
     return 1;
   }
-  const int pin = intFlag(argc, argv, "-p", ESPE_RGB_LED_PIN);
+  ArgScan args(argc, argv, "-p");
+  const int pin = (int)args.number("-p", ESPE_RGB_LED_PIN);
   if (!checkPin(pin, io)) return 1;
 
-  if (strcmp(argv[1], "off") == 0) {
+  if (args.at(0) == "off") {
     rgbLedWrite(pin, 0, 0, 0);
     io.out.println(F("rgb: off"));
     return 0;
   }
-  const int r = constrain(argInt(argc, argv, 0, 0), 0, 255);
-  const int g = constrain(argInt(argc, argv, 1, 0), 0, 255);
-  const int b = constrain(argInt(argc, argv, 2, 0), 0, 255);
+  const int r = constrain((int)args.at(0, "0").toInt(), 0, 255);
+  const int g = constrain((int)args.at(1, "0").toInt(), 0, 255);
+  const int b = constrain((int)args.at(2, "0").toInt(), 0, 255);
   rgbLedWrite(pin, r, g, b);
   io.out.printf("rgb: #%02X%02X%02X on GPIO%d\n", r, g, b, pin);
   return 0;
@@ -332,19 +326,18 @@ static int cmd_spi(int argc, char **argv, ShellIO &io) {
     io.out.println(F("   eg: spi xfer 5 9F 00 00 00        (read a flash chip's JEDEC id)"));
     return 1;
   }
-  if (strcmp(argv[1], "xfer") != 0) { io.out.println(F("spi: only 'xfer' is supported")); return 1; }
-  if (argc < 4) { io.out.println(F("spi: need a CS pin and at least one byte")); return 1; }
+  ArgScan args(argc, argv, "-hz -mode");
+  if (args.at(0) != "xfer") { io.out.println(F("spi: only 'xfer' is supported")); return 1; }
+  if (args.count() < 3) { io.out.println(F("spi: need a CS pin and at least one byte")); return 1; }
 
-  const int cs = atoi(argv[2]);
+  const int cs = args.at(1).toInt();
   if (!checkPin(cs, io)) return 1;
-  const int hz = intFlag(argc, argv, "-hz", 1000000);
-  const int mode = constrain(intFlag(argc, argv, "-mode", 0), 0, 3);
+  const int hz = (int)args.number("-hz", 1000000);
+  const int mode = constrain((int)args.number("-mode", 0), 0, 3);
 
   std::vector<uint8_t> tx;
-  for (int i = 3; i < argc; ++i) {
-    if (argv[i][0] == '-') { i++; continue; }        // skip a flag and its value
-    tx.push_back((uint8_t)strtol(argv[i], nullptr, 16));
-  }
+  for (size_t i = 2; i < args.count(); ++i)
+    tx.push_back((uint8_t)strtol(args.at(i).c_str(), nullptr, 16));
   if (tx.empty()) { io.out.println(F("spi: no bytes to send")); return 1; }
 
   pinMode(cs, OUTPUT);

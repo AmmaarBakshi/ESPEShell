@@ -141,6 +141,38 @@ String dirName(const String &p);
 bool   pathExists(const String &abs);
 bool   isDir(const String &abs);
 
+// ---- Argument scanning -----------------------------------------------------
+// Splits argv into flags and operands, and - the part that is easy to get
+// wrong by hand - knows which flags consume the argument after them, so
+// `truncate -s 100 file` sees one operand ("file") rather than two.
+//
+// `valueFlags` is a space-separated list of the flags that take a value,
+// e.g. "-t -s". A bare "-" counts as an operand, per the usual convention.
+class ArgScan {
+ public:
+  ArgScan(int argc, char **argv, const char *valueFlags = "");
+
+  bool   has(const char *flag) const;            // "-r" or "--recursive"
+  bool   letter(char c) const;                   // bundled short flag: -la
+  String value(const char *flag, const String &fallback = String()) const;
+  long   number(const char *flag, long fallback) const;
+
+  size_t count() const { return operands.size(); }
+  String at(size_t n, const String &fallback = String()) const {
+    return n < operands.size() ? operands[n] : fallback;
+  }
+
+  std::vector<String> operands;
+  std::vector<String> flags;
+
+ private:
+  std::vector<std::pair<String, String>> pairs;   // flag -> its value
+};
+
+// collectInput() for an already-scanned arg list: piped stdin if there is any,
+// otherwise the operands from `firstOperand` on, treated as file names.
+bool collectOperands(const ArgScan &args, size_t firstOperand, ShellIO &io, String &out);
+
 // ---- Shared command helpers ------------------------------------------------
 // Read a whole file into `out` in one allocation.
 //
