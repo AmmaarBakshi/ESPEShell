@@ -67,4 +67,4 @@
 #define FUSE_RULES_PATH      "/fuse.rules"
 
 // ---- Version ---------------------------------------------------------------
-#define ESPE_VERSION    "0.3.0"
+#define ESPE_VERSION    "0.4.0"

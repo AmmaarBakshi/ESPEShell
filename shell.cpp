@@ -764,6 +764,12 @@ static int cmd_help(int argc, char **argv, ShellIO &io) {
     helpList(io, G_ESP);
     return 0;
   }
+  if (argc >= 2 && strcmp(argv[1], "--host") == 0) {
+    io.out.println(F("Laptop bridge - needs tools/espehost.py running over there."));
+    io.out.println(F("'host' shows the link; 'host caps' lists what that agent supports."));
+    helpList(io, G_HOST);
+    return 0;
+  }
   if (argc >= 2) {
     const Command *c = findCommand(argv[1]);
     if (!c) { io.out.print(argv[1]); io.out.println(F(": no such command")); return 1; }
@@ -775,6 +781,7 @@ static int cmd_help(int argc, char **argv, ShellIO &io) {
   helpList(io, -1);
   io.out.println();
   io.out.println(F("Pipes '|' and redirection '<' '>' '>>' are supported."));
+  io.out.println(F("help --esp for board commands, help --host for the laptop bridge."));
   return 0;
 }
 
@@ -905,7 +912,7 @@ static int cmd_sh(int argc, char **argv, ShellIO &io) {
 }
 
 const Command CORE_CMDS[] = {
-  {"help",    cmd_help,    "help [--esp] [cmd]",  "list commands or show usage for one", G_CORE},
+  {"help",    cmd_help,    "help [--esp|--host] [cmd]", "list commands or show usage for one", G_CORE},
   {"man",     cmd_man,     "man <cmd>",           "show the manual entry for a command", G_CORE},
   {"whatis",  cmd_whatis,  "whatis <cmd>...",     "one-line description of a command",   G_CORE},
   {"apropos", cmd_apropos, "apropos <keyword>",   "search commands by keyword",          G_CORE},
