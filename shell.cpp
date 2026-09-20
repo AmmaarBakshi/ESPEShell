@@ -365,11 +365,24 @@ String expandVars(const String &s) {
 class StringPrint : public Print {
  public:
   String s;
-  size_t write(uint8_t c) override { s += (char)c; return 1; }
-  size_t write(const uint8_t *b, size_t n) override {
-    s.reserve(s.length() + n);
-    for (size_t i = 0; i < n; ++i) s += (char)b[i];
-    return n;
+
+  size_t write(uint8_t c) override { grow(1); s.concat((char)c); return 1; }
+  size_t write(const uint8_t *b, size_t n) override { grow(n); s.concat(b, (unsigned)n); return n; }
+
+ private:
+  size_t reserved = 0;   // String::capacity() is protected, so track it ourselves
+
+  // String::reserve() allocates exactly what it is asked for, so letting
+  // concat() size the buffer reallocs every 16 bytes. Every pipe stage and
+  // every runCapture() pushes its output through here a byte at a time, so
+  // double instead and the cost per byte becomes amortised-constant.
+  void grow(size_t extra) {
+    const size_t need = s.length() + extra;
+    if (need <= reserved) return;
+    size_t want = reserved ? reserved : 128;
+    while (want < need) want *= 2;
+    if (s.reserve(want))      reserved = want;
+    else if (s.reserve(need)) reserved = need;   // heap is tight: take the minimum
   }
 };
 
