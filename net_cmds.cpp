@@ -5,6 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <esp_mac.h>
 
 // ============================================================================
 //  Networking commands + environment/echo/printf built-ins
@@ -424,8 +425,42 @@ static int cmd_ap(int argc, char **argv, ShellIO &io) {
   return 1;
 }
 
+// ---- mac -------------------------------------------------------------------
+// The four interface MACs are all derived from the one base address burned
+// into eFuse, so `mac -b` is the number that actually identifies the chip.
+static void macLine(ShellIO &io, const char *label, esp_mac_type_t t) {
+  uint8_t m[6] = {0};
+  if (esp_read_mac(m, t) != ESP_OK) return;
+  io.out.printf("%-9s %02X:%02X:%02X:%02X:%02X:%02X
+", label, m[0], m[1], m[2], m[3], m[4], m[5]);
+}
+
+static int cmd_mac(int argc, char **argv, ShellIO &io) {
+  bool base = false;
+  for (int i = 1; i < argc; ++i) {
+    String a = argv[i];
+    if (a == "-b" || a == "--base") base = true;
+    else { io.out.print(a); io.out.println(F(": unknown option")); return 1; }
+  }
+  uint8_t m[6] = {0};
+  esp_efuse_mac_get_default(m);
+  if (base) {
+    io.out.printf("%02X:%02X:%02X:%02X:%02X:%02X
+", m[0], m[1], m[2], m[3], m[4], m[5]);
+    return 0;
+  }
+  io.out.printf("%-9s %02X:%02X:%02X:%02X:%02X:%02X
+", "base", m[0], m[1], m[2], m[3], m[4], m[5]);
+  macLine(io, "wifi-sta", ESP_MAC_WIFI_STA);
+  macLine(io, "wifi-ap", ESP_MAC_WIFI_SOFTAP);
+  macLine(io, "bt", ESP_MAC_BT);
+  macLine(io, "ethernet", ESP_MAC_ETH);
+  return 0;
+}
+
 const Command NET_CMDS[] = {
   {"ap",         cmd_ap,         "ap start [ssid] [pass]|stop", "run the board's own access point", G_NET},
+  {"mac",        cmd_mac,        "mac [-b]",             "show the interface MAC addresses", G_NET},
   {"ip",         cmd_ip,         "ip [addr|link|route]", "show network configuration",   G_NET},
   {"wifi",       cmd_wifi,       "wifi status|set <s> <p>|forget", "configure WiFi (persists in NVS)", G_NET},
   {"ping",       cmd_ping,       "ping [-c N] host",     "TCP reachability check",        G_NET},
