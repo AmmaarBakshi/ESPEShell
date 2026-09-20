@@ -481,6 +481,166 @@ def op_power(args: List[str]) -> Reply:
     return Reply(table(rows), val)
 
 
+# ---- cameras ---------------------------------------------------------------
+
+# Dark to light. Rendered on a dark terminal, so index 0 is the dimmest pixel.
+ASCII_RAMP = " .:-=+*#%@"
+
+# How long to let a camera's auto-exposure settle before keeping the frame.
+CAM_WARMUP_S = 1.2
+
+
+def _cv2():
+    try:
+        import cv2  # type: ignore
+        return cv2
+    except ImportError:
+        raise OpError("camera capture needs OpenCV (pip install opencv-python)")
+
+
+def _camera_names() -> List[str]:
+    """Device names in the order the capture backend will index them.
+
+    Best effort: enumeration and capture go through different subsystems on
+    every OS, so treat the names as labels and the index as the real handle.
+    """
+    if IS_WINDOWS:
+        items = ps_json(r"Get-PnpDevice -Class Camera,Image -Status OK "
+                        r"-ErrorAction SilentlyContinue | Select-Object FriendlyName")
+        return [i.get("FriendlyName", "?") for i in items if i.get("FriendlyName")]
+    if IS_LINUX:
+        names = []
+        for n in range(10):
+            dev = f"/dev/video{n}"
+            if not os.path.exists(dev):
+                continue
+            label = dev
+            try:
+                with open(f"/sys/class/video4linux/video{n}/name") as f:
+                    label = f"{f.read().strip()} ({dev})"
+            except OSError:
+                pass
+            names.append(label)
+        return names
+    if IS_MAC:
+        out = run_cmd(["system_profiler", "SPCameraDataType"])
+        return [ln.strip().rstrip(":") for ln in out.splitlines()
+                if ln.strip().endswith(":") and not ln.startswith(" " * 8)][1:]
+    return []
+
+
+def _arg_value(args: List[str], flag: str) -> Optional[str]:
+    if flag in args:
+        i = args.index(flag)
+        if i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _first_int(args: List[str], default: int = 0) -> int:
+    for a in args:
+        if a.isdigit():
+            return int(a)
+    return default
+
+
+def _grab_frame(index: int):
+    """Open camera `index`, discard warm-up frames, return one good frame."""
+    cv2 = _cv2()
+    # CAP_DSHOW avoids the several-second MSMF open penalty on Windows.
+    backend = getattr(cv2, "CAP_DSHOW", 0) if IS_WINDOWS else 0
+    cap = cv2.VideoCapture(index, backend) if backend else cv2.VideoCapture(index)
+    if not cap.isOpened():
+        cap.release()
+        raise OpError(f"cannot open camera {index} (in use by another app?)")
+    try:
+        # A webcam's first frames are black, then progressively exposed: its
+        # auto-exposure needs a few hundred ms to settle. Keep reading until
+        # the image stops getting brighter, or the budget runs out.
+        frame = None
+        deadline = time.monotonic() + CAM_WARMUP_S
+        last_mean = -1.0
+        while time.monotonic() < deadline:
+            ok, candidate = cap.read()
+            if not ok or candidate is None:
+                continue
+            frame = candidate
+            mean = float(candidate.mean())
+            if last_mean >= 0 and mean <= last_mean * 1.02:
+                break               # settled: no meaningful gain from waiting
+            last_mean = mean
+        if frame is None:
+            raise OpError(f"camera {index} opened but returned no frame")
+        return frame
+    finally:
+        cap.release()
+
+
+@op("cam", "list cameras, snapshot, ASCII preview")
+def op_cam(args: List[str]) -> Reply:
+    sub = args[0] if args and not args[0].startswith("-") and not args[0].isdigit() else "list"
+    rest = args[1:] if sub != "list" or (args and args[0] == "list") else args
+
+    if sub == "list":
+        names = _camera_names()
+        if not names:
+            raise OpError("no cameras detected")
+        body = "\n".join(f"  [{i}] {n}" for i, n in enumerate(names))
+        return Reply(f"{len(names)} camera(s):\n{body}", len(names))
+
+    if sub == "snap":
+        cv2 = _cv2()
+        index = _first_int(rest)
+        path = _arg_value(rest, "-o") or os.path.join(
+            os.path.expanduser("~"), f"espeshell-cam{index}-{int(time.time())}.jpg")
+        frame = _grab_frame(index)
+        if not cv2.imwrite(path, frame):
+            raise OpError(f"could not write {path}")
+        h, w = frame.shape[:2]
+        size = os.path.getsize(path)
+        return Reply(table([
+            ("camera", f"[{index}]"),
+            ("size", f"{w}x{h}"),
+            ("saved", path),
+            ("bytes", human_bytes(size)),
+        ]), size)
+
+    if sub in ("ascii", "view", "preview"):
+        cv2 = _cv2()
+        index = _first_int(rest)
+        cols = int(_arg_value(rest, "-w") or 64)
+        cols = max(16, min(cols, 120))          # keep the reply inside one line buffer
+        frame = _grab_frame(index)
+        h, w = frame.shape[:2]
+        # Terminal cells are about twice as tall as they are wide.
+        rows = max(8, int(cols * h / w / 2))
+        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (cols, rows),
+                           interpolation=cv2.INTER_AREA)
+        mean = float(small.mean())
+        lo, hi = float(small.min()), float(small.max())
+
+        # Ten ramp characters over the full 0-255 range wastes most of them on
+        # a dim scene. Stretch to the range actually present unless asked not
+        # to, so an indoor frame is legible instead of a block of spaces.
+        shown = small
+        if "--raw" not in rest and hi - lo > 4:
+            shown = cv2.normalize(small, None, 0, 255, cv2.NORM_MINMAX)
+
+        scale = len(ASCII_RAMP) - 1
+        art = "\n".join(
+            "".join(ASCII_RAMP[int(px) * scale // 255] for px in row)
+            for row in shown
+        )
+
+        header = f"camera [{index}]  {w}x{h} -> {cols}x{rows}  mean {mean:.0f}/255"
+        if hi - lo <= 4:
+            # Otherwise this prints as a blank rectangle and looks like a bug.
+            header += "\n(frame is featureless - privacy shutter closed, or a dark room)"
+        return Reply(f"{header}\n{art}", mean)
+
+    raise OpError(f"cam: unknown subcommand '{sub}' (list | snap | ascii)")
+
+
 # ============================================================================
 #  Agent
 # ============================================================================
