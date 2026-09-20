@@ -86,6 +86,7 @@ extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
 extern const Command CRON_CMDS[];    extern const size_t CRON_CMDS_N;
 extern const Command HOST_CMDS[];    extern const size_t HOST_CMDS_N;
 extern const Command FUSE_CMDS[];    extern const size_t FUSE_CMDS_N;
+extern const Command CALC_CMDS[];      extern const size_t CALC_CMDS_N;
 extern const Command TEXT2_CMDS[];     extern const size_t TEXT2_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
