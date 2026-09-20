@@ -86,6 +86,7 @@ extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
 extern const Command CRON_CMDS[];    extern const size_t CRON_CMDS_N;
 extern const Command HOST_CMDS[];    extern const size_t HOST_CMDS_N;
 extern const Command FUSE_CMDS[];    extern const size_t FUSE_CMDS_N;
+extern const Command NET2_CMDS[];      extern const size_t NET2_CMDS_N;
 extern const Command ESPINFO_CMDS[];   extern const size_t ESPINFO_CMDS_N;
 extern const Command SENSOR_CMDS[];    extern const size_t SENSOR_CMDS_N;
 extern const Command CALC_CMDS[];      extern const size_t CALC_CMDS_N;
