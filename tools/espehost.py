@@ -120,12 +120,20 @@ def run_cmd(argv: List[str], timeout: float = 10.0) -> str:
 
 
 def powershell(script: str, timeout: float = 15.0) -> str:
-    """Run a PowerShell snippet on Windows. Empty string everywhere else."""
+    """Run a PowerShell snippet on Windows. Empty string everywhere else.
+
+    The trailing `exit 0` matters. A non-terminating error leaves $? false and
+    PowerShell exits 1 even under -ErrorAction SilentlyContinue, which would
+    make run_cmd() discard perfectly good stdout. Get-PnpDevice does exactly
+    that: asked for thirteen device classes where one happens to have no
+    members, it errors on that one and still prints the other hundred-odd.
+    These probes are all best-effort, so partial output beats none.
+    """
     if not IS_WINDOWS:
         return ""
     return run_cmd(
         ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-Command", script],
+         "-Command", script + "; exit 0"],
         timeout=timeout,
     )
 
@@ -496,6 +504,10 @@ PROC_SAMPLE_S = 0.4
 # Caps on what a single reply may carry back over the bridge. The ESP32 buffers
 # one line at a time (HOST_BRIDGE_LINE_MAX in config.h, 8 KB), so anything
 # bigger than this would be silently cut mid-line at the far end.
+# Must stay at or below HOST_BRIDGE_LINE_MAX in config.h, with room for the
+# JSON envelope around the text.
+REPLY_LINE_MAX = 7900
+
 EXEC_TIMEOUT_S = 20.0
 EXEC_OUTPUT_MAX = 4000
 CLIP_MAX = 2000
@@ -1164,7 +1176,37 @@ class Agent:
         out = {"id": req_id, "ok": True, "text": reply.text}
         if reply.val is not None:
             out["val"] = round(float(reply.val), 4)
-        self.send(out)
+        self.send(self.fit(out))
+
+    @staticmethod
+    def fit(out: dict) -> dict:
+        """Shrink a reply until its encoded line fits the ESP32's buffer.
+
+        The firmware reads one line at a time into a fixed buffer
+        (HOST_BRIDGE_LINE_MAX) and drops the overflow, which would leave it
+        with unterminated JSON and no way to say why. Escaping means the
+        encoded length is unpredictable from the text length - a newline costs
+        two bytes, a non-ASCII character six - so measure, then trim and
+        measure again rather than guessing a character budget.
+        """
+        def encoded_len(o: dict) -> int:
+            return len(json.dumps(o, separators=(",", ":"), ensure_ascii=True)) + 1
+
+        if encoded_len(out) <= REPLY_LINE_MAX:
+            return out
+
+        note = "\n... truncated to fit the bridge buffer"
+        text = out.get("text", "")
+        # Binary search the longest prefix that still fits with the note.
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            probe = dict(out, text=text[:mid] + note)
+            if encoded_len(probe) <= REPLY_LINE_MAX:
+                lo = mid
+            else:
+                hi = mid - 1
+        return dict(out, text=text[:lo] + note)
 
     # -- session -------------------------------------------------------------
     def serve_once(self) -> None:
