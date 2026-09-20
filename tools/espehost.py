@@ -349,6 +349,138 @@ def op_disk(args: List[str]) -> Reply:
     return Reply("\n".join(lines), worst)
 
 
+# ---- power -----------------------------------------------------------------
+
+def _power_windows() -> Tuple[List[Tuple[str, object]], Optional[float], Optional[float]]:
+    """(rows, percent, watts). Watts is signed: + charging, - discharging.
+
+    The useful numbers live in the root\\WMI namespace, not Win32_Battery:
+    BatteryStatus carries the instantaneous charge/discharge rate in mW and
+    the pack voltage in mV, which together give the actual current draw.
+    Win32_Battery only has the rounded percentage.
+    """
+    rows: List[Tuple[str, object]] = []
+    status = ps_json(r"Get-CimInstance -Namespace root\WMI -ClassName BatteryStatus "
+                     r"-ErrorAction SilentlyContinue | Select-Object "
+                     r"Voltage,ChargeRate,DischargeRate,Charging,Discharging,"
+                     r"PowerOnline,RemainingCapacity")
+    summary = ps_json(r"Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | "
+                      r"Select-Object EstimatedChargeRemaining,EstimatedRunTime")
+    full = ps_json(r"Get-CimInstance -Namespace root\WMI -ClassName "
+                   r"BatteryFullChargedCapacity -ErrorAction SilentlyContinue | "
+                   r"Select-Object FullChargedCapacity")
+    design = ps_json(r"Get-CimInstance -Namespace root\WMI -ClassName BatteryStaticData "
+                     r"-ErrorAction SilentlyContinue | Select-Object DesignedCapacity")
+
+    if not status and not summary:
+        raise OpError("no battery (desktop, or the ACPI battery driver is absent)")
+
+    st = status[0] if status else {}
+    charging = bool(st.get("Charging"))
+    on_ac = bool(st.get("PowerOnline"))
+    mv = float(st.get("Voltage") or 0)
+    charge_mw = float(st.get("ChargeRate") or 0)
+    drain_mw = float(st.get("DischargeRate") or 0)
+
+    pct: Optional[float] = None
+    if summary and summary[0].get("EstimatedChargeRemaining") is not None:
+        pct = float(summary[0]["EstimatedChargeRemaining"])
+    elif full and st.get("RemainingCapacity"):
+        cap = float(full[0].get("FullChargedCapacity") or 0)
+        if cap:
+            pct = 100.0 * float(st["RemainingCapacity"]) / cap
+
+    rows.append(("source", "AC adapter" if on_ac else "battery"))
+    rows.append(("state", "charging" if charging else
+                          "discharging" if drain_mw else
+                          "full" if on_ac else "idle"))
+    if pct is not None:
+        rows.append(("charge", f"{pct:.0f}%"))
+
+    # Signed so a fusion rule can say "draw more negative than -20W".
+    watts: Optional[float] = None
+    mw = charge_mw if charging else -drain_mw
+    if mw:
+        watts = mw / 1000.0
+        rows.append(("power", f"{watts:+.2f} W  ({abs(mw):.0f} mW {'in' if mw > 0 else 'out'})"))
+        if mv:
+            rows.append(("current", f"{abs(mw) / (mv / 1000.0):.0f} mA at {mv / 1000.0:.2f} V"))
+    elif mv:
+        rows.append(("voltage", f"{mv / 1000.0:.2f} V"))
+
+    if full and full[0].get("FullChargedCapacity"):
+        cap = float(full[0]["FullChargedCapacity"])
+        remain = float(st.get("RemainingCapacity") or 0)
+        rows.append(("capacity", f"{remain:.0f} / {cap:.0f} mWh"))
+        if design and design[0].get("DesignedCapacity"):
+            dcap = float(design[0]["DesignedCapacity"])
+            if dcap:
+                rows.append(("health", f"{100.0 * cap / dcap:.0f}% of design ({dcap:.0f} mWh)"))
+
+    # EstimatedRunTime is 0xFFFFFFFF/60 minutes when Windows has no estimate.
+    if summary and summary[0].get("EstimatedRunTime") is not None:
+        mins = int(summary[0]["EstimatedRunTime"])
+        if 0 < mins < 60 * 24 * 7:
+            rows.append(("remaining", human_secs(mins * 60)))
+    return rows, pct, watts
+
+
+def _power_posix() -> Tuple[List[Tuple[str, object]], Optional[float], Optional[float]]:
+    rows: List[Tuple[str, object]] = []
+    pct: Optional[float] = None
+    watts: Optional[float] = None
+
+    if psutil and hasattr(psutil, "sensors_battery"):
+        bat = psutil.sensors_battery()
+        if bat is not None:
+            pct = float(bat.percent)
+            rows.append(("source", "AC adapter" if bat.power_plugged else "battery"))
+            rows.append(("charge", f"{pct:.0f}%"))
+            if bat.secsleft not in (getattr(psutil, "POWER_TIME_UNLIMITED", -1),
+                                    getattr(psutil, "POWER_TIME_UNKNOWN", -2)):
+                rows.append(("remaining", human_secs(bat.secsleft)))
+
+    # Linux exposes the instantaneous draw; psutil does not surface it.
+    base = "/sys/class/power_supply"
+    if IS_LINUX and os.path.isdir(base):
+        for entry in sorted(os.listdir(base)):
+            path = os.path.join(base, entry)
+
+            def read(field: str) -> Optional[float]:
+                try:
+                    with open(os.path.join(path, field)) as f:
+                        return float(f.read().strip())
+                except (OSError, ValueError):
+                    return None
+
+            power_uw = read("power_now")
+            if power_uw is None:
+                cur_ua, volt_uv = read("current_now"), read("voltage_now")
+                if cur_ua is not None and volt_uv is not None:
+                    power_uw = cur_ua * volt_uv / 1e6
+            if power_uw:
+                watts = power_uw / 1e6
+                rows.append(("power", f"{watts:.2f} W"))
+                volt_uv = read("voltage_now")
+                if volt_uv:
+                    rows.append(("current", f"{power_uw / volt_uv * 1e3:.0f} mA "
+                                            f"at {volt_uv / 1e6:.2f} V"))
+                break
+
+    if not rows:
+        raise OpError("no battery information available (pip install psutil)")
+    return rows, pct, watts
+
+
+@op("power", "battery, charge state, current draw")
+def op_power(args: List[str]) -> Reply:
+    rows, pct, watts = _power_windows() if IS_WINDOWS else _power_posix()
+    # Default scalar is the charge percentage - "battery under 20" is the rule
+    # people actually write. --watts switches it to the draw.
+    val = watts if "--watts" in args or "-w" in args else pct
+    return Reply(table(rows), val)
+
+
 # ============================================================================
 #  Agent
 # ============================================================================
