@@ -282,6 +282,7 @@ void setup() {
   telnetServer.begin();
   telnetServer.setNoDelay(true);
   hostBridgeBegin();   // laptop agent connects in on HOST_BRIDGE_PORT
+  fuseLoadAtBoot();    // restore /fuse.rules, if any
 
   CountingPrint cp(Serial);
   printBanner(cp);
@@ -363,6 +364,30 @@ static void drainHost() {
   }
 }
 
+// Actions triggered by fusion rules. Same shape as drainCron(): run the
+// command once with the output captured, echo it to every live session.
+static void drainFuse() {
+  fusePoll();
+  String action;
+  while (fusePopDue(action)) {
+    String out = runCapture(action);
+
+    CountingPrint scp(Serial);
+    scp.println();
+    scp.print(F("[fuse] ")); scp.println(action);
+    scp.print(out);
+    redrawLine(scp, serSt.line);
+
+    if (telnetClient && telnetClient.connected() && tnState == T_SHELL) {
+      CountingPrint tcp(telnetClient);
+      tcp.println();
+      tcp.print(F("[fuse] ")); tcp.println(action);
+      tcp.print(out);
+      redrawLine(tcp, tnSt.line);
+    }
+  }
+}
+
 void loop() {
   handleTelnet();
   handleSerial();
@@ -370,5 +395,6 @@ void loop() {
   drainCron();
   drainMqtt();
   drainHost();     // no-op unless the laptop agent is connected
+  drainFuse();     // no-op unless fusion rules are armed
   delay(1);
 }

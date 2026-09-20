@@ -880,5 +880,6 @@ const CmdTable CMD_TABLES[] = {
   {HTTPD_CMDS, HTTPD_CMDS_N},
   {CRON_CMDS, CRON_CMDS_N},
   {HOST_CMDS, HOST_CMDS_N},
+  {FUSE_CMDS, FUSE_CMDS_N},
 };
 const size_t CMD_TABLE_COUNT = sizeof(CMD_TABLES) / sizeof(CMD_TABLES[0]);

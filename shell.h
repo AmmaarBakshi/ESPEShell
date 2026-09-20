@@ -85,6 +85,7 @@ extern const Command DIAG_CMDS[];    extern const size_t DIAG_CMDS_N;
 extern const Command HTTPD_CMDS[];   extern const size_t HTTPD_CMDS_N;
 extern const Command CRON_CMDS[];    extern const size_t CRON_CMDS_N;
 extern const Command HOST_CMDS[];    extern const size_t HOST_CMDS_N;
+extern const Command FUSE_CMDS[];    extern const size_t FUSE_CMDS_N;
 
 // The aggregate, built in shell.cpp. Grows as modules are added.
 extern const CmdTable CMD_TABLES[];
@@ -205,6 +206,12 @@ bool hostAskNumber(const String &op, const String &args, double &value);
 // Body shared by every h* command: ask `op`, print the reply. Arguments from
 // argv[firstArg] on are passed to the agent verbatim.
 int  hostRun(const String &op, int argc, char **argv, int firstArg, ShellIO &io);
+
+// ---- Fusion mode (fuse_cmds.cpp) - laptop sensors <-> ESP32 pins -----------
+void   fusePoll();                   // call once per main loop() iteration
+bool   fusePopDue(String &line);     // next action a rule has triggered
+size_t fuseRuleCount();
+void   fuseLoadAtBoot();             // restore /fuse.rules; called from setup()
 
 // ---- MQTT (mqtt_cmds.cpp) - optional, needs the PubSubClient library -------
 void   mqttPoll();          // call once per main loop() iteration

@@ -52,5 +52,14 @@
 #define HOST_BRIDGE_TIMEOUT_MS 5000    // per-request wait before giving up
 #define HOST_BRIDGE_LINE_MAX   8192    // longest reply line we will buffer
 
+// ---- Fusion mode (fuse_cmds.cpp) -------------------------------------------
+// How often rules are evaluated, and the per-request budget when a rule's
+// source lives on the laptop. The host timeout is shorter than
+// HOST_BRIDGE_TIMEOUT_MS on purpose: rule evaluation runs on the main loop,
+// so a slow agent must not stall the shell for the full interactive timeout.
+#define FUSE_INTERVAL_MS     5000
+#define FUSE_HOST_TIMEOUT_MS 2000
+#define FUSE_RULES_PATH      "/fuse.rules"
+
 // ---- Version ---------------------------------------------------------------
 #define ESPE_VERSION    "0.3.0"
