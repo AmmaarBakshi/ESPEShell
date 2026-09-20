@@ -1,6 +1,7 @@
 #include "shell.h"
 #include <LittleFS.h>
 #include <algorithm>
+#include "esp_random.h"
 
 // ============================================================================
 //  Text-processing commands
@@ -68,6 +69,28 @@ static int cmd_rev(int argc, char **argv, ShellIO &io) {
     for (int i = (int)l.length(); i-- > 0; ) r += l[i];
     io.out.println(r);
   }
+  return 0;
+}
+
+// ---- shuf ------------------------------------------------------------------
+// Fisher-Yates over the input lines, seeded from the hardware RNG.
+static int cmd_shuf(int argc, char **argv, ShellIO &io) {
+  int count = -1;
+  std::vector<String> files;
+  for (int i = 1; i < argc; ++i) {
+    String a = argv[i];
+    if (a == "-n" && i + 1 < argc) count = atoi(argv[++i]);
+    else if (a.length() > 1 && a[0] == '-' && isdigit((int)a[1])) count = atoi(a.c_str() + 1);
+    else if (a[0] != '-') files.push_back(a);
+  }
+  String data;
+  if (!getInput(io, files, data)) return 0;
+  std::vector<String> lines; splitLines(data, lines);
+  for (size_t i = lines.size(); i > 1; --i)
+    std::swap(lines[i - 1], lines[esp_random() % i]);
+  size_t n = lines.size();
+  if (count >= 0 && (size_t)count < n) n = (size_t)count;
+  for (size_t i = 0; i < n; ++i) io.out.println(lines[i]);
   return 0;
 }
 
@@ -490,6 +513,7 @@ const Command TEXT_CMDS[] = {
   {"less",    cmd_cat,     "less [file]",          "page through text (no pager: cat)", G_TEXT},
   {"tac",     cmd_tac,     "tac [file...]",        "print lines in reverse order",      G_TEXT},
   {"rev",     cmd_rev,     "rev [file...]",        "reverse the characters of each line",G_TEXT},
+  {"shuf",    cmd_shuf,    "shuf [-n N] [file...]","shuffle lines randomly",            G_TEXT},
   {"head",    cmd_head,    "head [-n N] [file]",   "first N lines (default 10)",        G_TEXT},
   {"tail",    cmd_tail,    "tail [-n N] [file]",   "last N lines (default 10)",         G_TEXT},
   {"wc",      cmd_wc,      "wc [-lwc] [file]",     "count lines, words, characters",    G_TEXT},
