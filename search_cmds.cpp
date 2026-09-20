@@ -20,13 +20,11 @@ static String leaf(const String &name) {
   return (sl >= 0) ? name.substring(sl + 1) : name;
 }
 
+// grep/rg walk whole trees, so this runs once per candidate file: it has to be
+// the bulk reader, not an append loop. Silent on failure by design - an
+// unreadable file during a recursive search is skipped, not reported.
 static bool readFile(const String &abs, String &out) {
-  File f = LittleFS.open(abs, "r");
-  if (!f || f.isDirectory()) { if (f) f.close(); return false; }
-  uint8_t b[128];
-  while (true) { int n = f.read(b, sizeof(b)); if (n <= 0) break; for (int k = 0; k < n; ++k) out += (char)b[k]; }
-  f.close();
-  return true;
+  return readFileToString(abs, out, nullptr);
 }
 
 // Recursively collect file (not directory) paths under `root`.

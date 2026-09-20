@@ -176,6 +176,7 @@ static int cmd_base64(int argc, char **argv, ShellIO &io) {
   // Decode: ignore whitespace/newlines, stop at padding.
   int acc = 0, bits = 0;
   String out;
+  out.reserve(data.length() * 3 / 4 + 3);   // decoded size, less any whitespace
   for (size_t i = 0; i < data.length(); ++i) {
     char c = data[i];
     if (c == '=' ) break;
