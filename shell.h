@@ -96,8 +96,9 @@ extern String g_hostname;     // prompt host
 extern String g_user;         // prompt user / whoami
 extern String g_telnetPeer;   // IP of the connected telnet client, or ""
 extern String g_telnetPassword; // current telnet login password (changeable at runtime)
-extern volatile uint32_t g_bytesIn;   // bytes received across sessions
-extern volatile uint32_t g_bytesOut;  // bytes sent across sessions
+extern uint32_t g_bytesIn;    // bytes received across sessions
+extern uint32_t g_bytesOut;   // bytes sent across sessions (main loop only:
+                              // nothing here runs in an ISR, so no volatile)
 
 // ---- Environment variables -------------------------------------------------
 String envGet(const String &key);

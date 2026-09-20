@@ -10,8 +10,8 @@ String g_cwd = "/";
 String g_hostname = ESPE_HOSTNAME;
 String g_user = ESPE_USER;
 String g_telnetPeer = "";
-volatile uint32_t g_bytesIn = 0;
-volatile uint32_t g_bytesOut = 0;
+uint32_t g_bytesIn = 0;
+uint32_t g_bytesOut = 0;
 
 // Bulk-read tunables (see readFileToString).
 static const size_t READ_CHUNK    = 512;    // bytes per LittleFS read
