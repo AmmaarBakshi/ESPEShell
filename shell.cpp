@@ -13,6 +13,10 @@ String g_telnetPeer = "";
 volatile uint32_t g_bytesIn = 0;
 volatile uint32_t g_bytesOut = 0;
 
+// Bulk-read tunables (see readFileToString).
+static const size_t READ_CHUNK    = 512;    // bytes per LittleFS read
+static const size_t READ_HEADROOM = 8192;   // heap left free after the slurp
+
 static std::vector<std::pair<String, String>> s_env;
 static std::vector<std::pair<String, String>> s_alias;
 
@@ -227,27 +231,57 @@ String completeLine(const String &partial, Print &out) {
 // ============================================================================
 //  Shared command helpers
 // ============================================================================
+bool readFileToString(const String &abs, String &out, Print *err, const char *label) {
+  out = "";
+  const char *name = label ? label : abs.c_str();
+
+  File f = LittleFS.open(abs, "r");
+  if (!f || f.isDirectory()) {
+    if (err) { err->print(name); err->println(F(": cannot read")); }
+    if (f) f.close();
+    return false;
+  }
+
+  const size_t n = f.size();
+  // Keep a margin: the caller usually copies or transforms what it gets back,
+  // and the WiFi/Telnet buffers have to keep living alongside it.
+  if (n + READ_HEADROOM > ESP.getMaxAllocHeap()) {
+    if (err) {
+      err->print(name);
+      err->print(F(": too big to read ("));
+      err->print(humanBytes(n));
+      err->print(F(", largest free block "));
+      err->print(humanBytes(ESP.getMaxAllocHeap()));
+      err->println(F(")"));
+    }
+    f.close();
+    return false;
+  }
+  if (!out.reserve(n)) {
+    if (err) { err->print(name); err->println(F(": out of memory")); }
+    f.close();
+    return false;
+  }
+
+  uint8_t buf[READ_CHUNK];
+  for (;;) {
+    int r = f.read(buf, sizeof(buf));
+    if (r <= 0) break;
+    out.concat(buf, (unsigned)r);   // one memcpy per chunk, no reallocation
+  }
+  f.close();
+  return true;
+}
+
 bool collectInput(int argc, char **argv, int firstFileArg, ShellIO &io, String &out) {
   out = "";
   if (io.hasIn()) { out = *io.in; return true; }
   bool any = false;
   for (int i = firstFileArg; i < argc; ++i) {
     if (argv[i][0] == '-') continue;  // skip option-looking args
-    String ap = resolvePath(argv[i]);
-    File f = LittleFS.open(ap, "r");
-    if (!f || f.isDirectory()) {
-      io.out.print(argv[i]);
-      io.out.println(": cannot read");
-      if (f) f.close();
-      continue;
-    }
-    uint8_t buf[128];
-    while (true) {
-      int n = f.read(buf, sizeof(buf));
-      if (n <= 0) break;
-      for (int k = 0; k < n; ++k) out += (char)buf[k];
-    }
-    f.close();
+    String chunk;
+    if (!readFileToString(resolvePath(argv[i]), chunk, &io.out, argv[i])) continue;
+    out += chunk;
     any = true;
   }
   return any;
@@ -519,22 +553,7 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
     if (s == 0) {
       String inFile;
       if (parseInRedirect(args, inFile)) {
-        String abs = resolvePath(inFile);
-        File f = LittleFS.open(abs, "r");
-        if (!f || f.isDirectory()) {
-          realOut.print(inFile);
-          realOut.println(": cannot read");
-          if (f) f.close();
-          return 1;
-        }
-        stageIn = "";
-        uint8_t buf[128];
-        while (true) {
-          int n = f.read(buf, sizeof(buf));
-          if (n <= 0) break;
-          for (int k = 0; k < n; ++k) stageIn += (char)buf[k];
-        }
-        f.close();
+        if (!readFileToString(resolvePath(inFile), stageIn, &realOut, inFile.c_str())) return 1;
         haveIn = true;
       }
     }
@@ -776,21 +795,8 @@ static int cmd_exit(int argc, char **argv, ShellIO &io) {
 // Also used to auto-run /boot.sh at startup (see ESPEShell.ino's setup()).
 static int cmd_sh(int argc, char **argv, ShellIO &io) {
   if (argc < 2) { io.out.println(F("usage: sh <file>   (runs one shell command per line)")); return 1; }
-  String abs = resolvePath(argv[1]);
-  File f = LittleFS.open(abs, "r");
-  if (!f || f.isDirectory()) {
-    io.out.print(argv[1]); io.out.println(F(": cannot read"));
-    if (f) f.close();
-    return 1;
-  }
   String content;
-  uint8_t buf[128];
-  while (true) {
-    int n = f.read(buf, sizeof(buf));
-    if (n <= 0) break;
-    for (int k = 0; k < n; ++k) content += (char)buf[k];
-  }
-  f.close();
+  if (!readFileToString(resolvePath(argv[1]), content, &io.out, argv[1])) return 1;
 
   std::vector<String> lines;
   splitLines(content, lines);

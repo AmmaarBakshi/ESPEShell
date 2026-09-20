@@ -13,12 +13,9 @@ static bool getInput(ShellIO &io, const std::vector<String> &files, String &out)
   if (io.hasIn()) { out = *io.in; return true; }
   bool any = false;
   for (auto &fn : files) {
-    String ap = resolvePath(fn);
-    File f = LittleFS.open(ap, "r");
-    if (!f || f.isDirectory()) { io.out.print(fn); io.out.println(F(": cannot read")); if (f) f.close(); continue; }
-    uint8_t b[128];
-    while (true) { int n = f.read(b, sizeof(b)); if (n <= 0) break; for (int k = 0; k < n; ++k) out += (char)b[k]; }
-    f.close();
+    String chunk;
+    if (!readFileToString(resolvePath(fn), chunk, &io.out, fn.c_str())) continue;
+    out += chunk;
     any = true;
   }
   return any;

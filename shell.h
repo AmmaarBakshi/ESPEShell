@@ -133,6 +133,17 @@ bool   pathExists(const String &abs);
 bool   isDir(const String &abs);
 
 // ---- Shared command helpers ------------------------------------------------
+// Read a whole file into `out` in one allocation.
+//
+// Appending byte-by-byte to a String is quadratic here: the core's
+// changeBuffer() reallocs every 16 bytes, so a 32 KB file costs ~2000 reallocs
+// and copies. Everything that slurps a file goes through this instead.
+//
+// `label` is the name to use in the error message (the user's spelling of the
+// path); pass nullptr to use `abs`. Fails, with a message, on a missing file,
+// a directory, or a file too big to hold in the free heap.
+bool readFileToString(const String &abs, String &out, Print *err, const char *label = nullptr);
+
 // Load piped stdin, or the concatenation of file args (from firstFileArg on),
 // into `out`. Returns true if any input source was found.
 bool collectInput(int argc, char **argv, int firstFileArg, ShellIO &io, String &out);
