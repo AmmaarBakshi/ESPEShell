@@ -489,6 +489,10 @@ ASCII_RAMP = " .:-=+*#%@"
 # How long to let a camera's auto-exposure settle before keeping the frame.
 CAM_WARMUP_S = 1.2
 
+# Sampling window for per-process CPU. Long enough to be meaningful, short
+# enough that the shell does not appear to hang.
+PROC_SAMPLE_S = 0.4
+
 
 def _cv2():
     try:
@@ -639,6 +643,271 @@ def op_cam(args: List[str]) -> Reply:
         return Reply(f"{header}\n{art}", mean)
 
     raise OpError(f"cam: unknown subcommand '{sub}' (list | snap | ascii)")
+
+
+# ---- input / output devices -------------------------------------------------
+
+# PnP classes worth showing, in the order a person would look for them.
+# Left is the `io` subcommand, right is the Windows device class.
+IO_CLASSES = [
+    ("usb", "USB"),
+    ("hid", "HIDClass"),
+    ("keyboard", "Keyboard"),
+    ("mouse", "Mouse"),
+    ("audio", "AudioEndpoint"),
+    ("media", "MEDIA"),
+    ("display", "Display"),
+    ("monitor", "Monitor"),
+    ("net", "Net"),
+    ("camera", "Camera"),
+    ("bluetooth", "Bluetooth"),
+    ("printer", "Printer"),
+    ("disk", "DiskDrive"),
+]
+
+
+def _pnp_devices(classes: List[str]) -> List[Tuple[str, str, str]]:
+    """(class, name, status) for the given Windows device classes."""
+    quoted = ",".join(f"'{c}'" for c in classes)
+    items = ps_json(f"Get-PnpDevice -Class {quoted} -ErrorAction SilentlyContinue | "
+                    f"Select-Object Class,FriendlyName,Status", timeout=25.0)
+    out = []
+    for i in items:
+        name = i.get("FriendlyName")
+        if name:
+            out.append((i.get("Class", "?"), name, i.get("Status", "?")))
+    return out
+
+
+def _serial_ports() -> List[str]:
+    if IS_WINDOWS:
+        items = ps_json(r"Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue | "
+                        r"Select-Object DeviceID,Caption")
+        if items:
+            return [f"{i.get('DeviceID','?')}  {i.get('Caption','')}".strip() for i in items]
+        # Win32_SerialPort misses USB-UART bridges; the registry does not.
+        out = powershell(r"Get-ItemProperty HKLM:\HARDWARE\DEVICEMAP\SERIALCOMM "
+                         r"-ErrorAction SilentlyContinue | Out-String")
+        return [ln.strip() for ln in out.splitlines()
+                if ln.strip().startswith(("\\Device", "Device"))]
+    ports = []
+    for prefix in ("/dev/ttyUSB", "/dev/ttyACM", "/dev/ttyS", "/dev/tty.usb", "/dev/cu.usb"):
+        for n in range(8):
+            for cand in (f"{prefix}{n}", prefix):
+                if os.path.exists(cand) and cand not in ports:
+                    ports.append(cand)
+    return ports
+
+
+@op("io", "USB/HID/audio/display devices and serial ports")
+def op_io(args: List[str]) -> Reply:
+    want = [a.lower() for a in args if not a.startswith("-")]
+
+    if want and want[0] == "serial":
+        ports = _serial_ports()
+        if not ports:
+            raise OpError("no serial ports found")
+        return Reply("serial ports:\n" + "\n".join(f"  {p}" for p in ports), len(ports))
+
+    if not IS_WINDOWS:
+        if IS_LINUX and shutil.which("lsusb"):
+            out = run_cmd(["lsusb"]).strip()
+            if out:
+                return Reply(out, len(out.splitlines()))
+        if IS_MAC:
+            out = run_cmd(["system_profiler", "SPUSBDataType"], timeout=20).strip()
+            if out:
+                return Reply(out[:6000], None)
+        raise OpError("device enumeration needs lsusb (Linux) or PowerShell (Windows)")
+
+    selected = [cls for key, cls in IO_CLASSES if not want or key in want]
+    if not selected:
+        keys = " ".join(k for k, _ in IO_CLASSES)
+        raise OpError(f"io: unknown category. try one of: {keys} serial")
+
+    devices = _pnp_devices(selected)
+    if not devices:
+        raise OpError("no matching devices")
+
+    # Group by class so a bare `hio` is scannable rather than a flat wall.
+    by_class: Dict[str, List[Tuple[str, str]]] = {}
+    for cls, name, status in devices:
+        by_class.setdefault(cls, []).append((name, status))
+
+    lines = []
+    for cls in sorted(by_class):
+        entries = sorted(by_class[cls])
+        lines.append(f"{cls}  ({len(entries)})")
+        for name, status in entries:
+            flag = "" if status == "OK" else f"   [{status}]"
+            lines.append(f"  {name[:66]}{flag}")
+    return Reply("\n".join(lines), len(devices))
+
+
+# ---- network ----------------------------------------------------------------
+
+@op("net", "interfaces, addresses, link state")
+def op_net(args: List[str]) -> Reply:
+    if "conn" in args or "-c" in args:
+        if not psutil:
+            raise OpError("connection list needs psutil (pip install psutil)")
+        lines = ["%-24s %-24s %-12s %s" % ("local", "remote", "state", "pid")]
+        for c in psutil.net_connections(kind="inet")[:40]:
+            laddr = f"{c.laddr.ip}:{c.laddr.port}" if c.laddr else "-"
+            raddr = f"{c.raddr.ip}:{c.raddr.port}" if c.raddr else "-"
+            lines.append("%-24s %-24s %-12s %s" % (laddr[:24], raddr[:24], c.status, c.pid or "-"))
+        return Reply("\n".join(lines), len(lines) - 1)
+
+    if not psutil:
+        raise OpError("interface details need psutil (pip install psutil)")
+
+    addrs = psutil.net_if_addrs()
+    stats = psutil.net_if_stats()
+    counters = psutil.net_io_counters(pernic=True)
+    lines = []
+    for name in sorted(addrs):
+        st = stats.get(name)
+        if st and not st.isup and "-a" not in args:
+            continue        # skip the pile of down virtual adapters by default
+        speed = f"{st.speed} Mb/s" if st and st.speed else "-"
+        lines.append(f"{name}  [{'up' if st and st.isup else 'down'}, {speed}]")
+        for a in addrs[name]:
+            if a.family == socket.AF_INET:
+                lines.append(f"    inet  {a.address}/{a.netmask or '?'}")
+            elif a.family == socket.AF_INET6:
+                lines.append(f"    inet6 {a.address.split('%')[0]}")
+            elif getattr(a.family, "name", "") in ("AF_LINK", "AF_PACKET"):
+                lines.append(f"    ether {a.address}")
+        io = counters.get(name)
+        if io:
+            lines.append(f"    rx {human_bytes(io.bytes_recv)}  tx {human_bytes(io.bytes_sent)}")
+    if not lines:
+        raise OpError("no interfaces up")
+    return Reply("\n".join(lines), len([l for l in lines if not l.startswith(" ")]))
+
+
+# ---- processes ---------------------------------------------------------------
+
+@op("proc", "top processes by CPU or memory")
+def op_proc(args: List[str]) -> Reply:
+    count = 15
+    for a in args:
+        if a.isdigit():
+            count = max(1, min(int(a), 50))
+    by_mem = "-m" in args or "mem" in args
+
+    if not psutil:
+        if IS_WINDOWS:
+            key = "WS" if by_mem else "CPU"
+            out = powershell(f"Get-Process | Sort-Object {key} -Descending | "
+                             f"Select-Object -First {count} Id,ProcessName,WS,CPU | "
+                             f"Format-Table -AutoSize | Out-String -Width 78")
+            if out.strip():
+                return Reply(out.strip(), count)
+        raise OpError("process list needs psutil (pip install psutil)")
+
+    # cpu_percent() is a delta since the last call *on that same Process
+    # object*, and the first call always returns 0.0. So prime every process,
+    # wait, then read the same objects back - process_iter() alone would report
+    # a screen full of zeroes.
+    handles = list(psutil.process_iter(["pid", "name"]))
+    for p in handles:
+        try:
+            p.cpu_percent(None)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    time.sleep(PROC_SAMPLE_S)
+
+    cores = os.cpu_count() or 1
+    procs = []
+    for p in handles:
+        try:
+            # Normalise to whole-machine percent: psutil reports per-core, so a
+            # busy thread reads 100% on an 8-core box where top would say 12%.
+            cpu = p.cpu_percent(None) / cores
+            rss = p.memory_info().rss
+            procs.append((p.info["pid"], p.info["name"] or "?", cpu, rss))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue      # process exited, or is protected: both are expected
+
+    procs.sort(key=lambda r: r[3] if by_mem else r[2], reverse=True)
+    lines = ["%7s  %-28s %7s %9s" % ("pid", "name", "cpu", "rss")]
+    for pid, name, cpu, rss in procs[:count]:
+        lines.append("%7d  %-28s %6.1f%% %9s" % (pid, name[:28], cpu, human_bytes(rss)))
+    return Reply("\n".join(lines), len(procs))
+
+
+# ---- sensors -----------------------------------------------------------------
+
+@op("temp", "thermal sensors and fans")
+def op_temp(args: List[str]) -> Reply:
+    rows: List[Tuple[str, object]] = []
+    hottest: Optional[float] = None
+
+    if psutil and hasattr(psutil, "sensors_temperatures"):
+        for chip, entries in (psutil.sensors_temperatures() or {}).items():
+            for e in entries:
+                label = f"{chip}/{e.label}" if e.label else chip
+                rows.append((label[:18], f"{e.current:.1f} C"))
+                hottest = e.current if hottest is None else max(hottest, e.current)
+    if psutil and hasattr(psutil, "sensors_fans"):
+        for chip, entries in (psutil.sensors_fans() or {}).items():
+            for e in entries:
+                rows.append((f"fan {e.label or chip}"[:18], f"{e.current} rpm"))
+
+    if not rows and IS_WINDOWS:
+        # Most consumer laptops do not expose MSAcpi_ThermalZoneTemperature,
+        # and the ones that do need an elevated shell. Try anyway, then say so.
+        for item in ps_json(r"Get-CimInstance -Namespace root\WMI -ClassName "
+                            r"MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | "
+                            r"Select-Object InstanceName,CurrentTemperature"):
+            raw = item.get("CurrentTemperature")
+            if raw:
+                celsius = float(raw) / 10.0 - 273.15    # tenths of a kelvin
+                name = str(item.get("InstanceName", "zone")).split("\\")[-1]
+                rows.append((name[:18], f"{celsius:.1f} C"))
+                hottest = celsius if hottest is None else max(hottest, celsius)
+
+    if not rows:
+        raise OpError("no thermal sensors readable "
+                      "(Windows rarely exposes these without vendor drivers)")
+    return Reply(table(rows, width=18), hottest)
+
+
+@op("gpu", "graphics adapters")
+def op_gpu(args: List[str]) -> Reply:
+    if IS_WINDOWS:
+        items = ps_json(r"Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | "
+                        r"Select-Object Name,AdapterRAM,DriverVersion,"
+                        r"CurrentHorizontalResolution,CurrentVerticalResolution")
+        if not items:
+            raise OpError("no video controllers reported")
+        lines = []
+        for i in items:
+            lines.append(i.get("Name", "?"))
+            ram = i.get("AdapterRAM")
+            # AdapterRAM is a signed 32-bit field: >=4GB wraps to a negative.
+            if ram and int(ram) > 0:
+                lines.append(f"    vram   {human_bytes(int(ram))}")
+            hres = i.get("CurrentHorizontalResolution")
+            vres = i.get("CurrentVerticalResolution")
+            if hres and vres:
+                lines.append(f"    mode   {hres}x{vres}")
+            if i.get("DriverVersion"):
+                lines.append(f"    driver {i['DriverVersion']}")
+        return Reply("\n".join(lines), len(items))
+
+    if shutil.which("nvidia-smi"):
+        out = run_cmd(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+                       "--format=csv,noheader"]).strip()
+        if out:
+            return Reply(out, None)
+    if IS_LINUX and shutil.which("lspci"):
+        out = "\n".join(l for l in run_cmd(["lspci"]).splitlines()
+                        if "VGA" in l or "3D controller" in l)
+        if out:
+            return Reply(out, None)
+    raise OpError("no GPU information available")
 
 
 # ============================================================================
