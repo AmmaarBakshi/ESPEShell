@@ -4,12 +4,22 @@ A Unix-like shell for the **ESP32**, written as an Arduino sketch. You talk to i
 over **USB Serial** or remotely over **Telnet** — the practical, ssh-like way to
 reach an ESP32 (full SSH crypto does not fit comfortably on the chip).
 
-It implements ~100 common shell commands (filesystem, text processing, search,
+It implements **230+ commands** (filesystem, text processing, search,
 system/info, networking) on top of **LittleFS**, plus ESP-specific commands like
 `tsw`, `pin`, `pwm`, `restart` and `data`. Pipes (`|`) and redirection (`<`, `>`, `>>`)
 work, and so does command history (Up/Down) and Tab completion. WiFi credentials
 can be set at runtime (no reflash needed) and firmware can be updated over the
 air.
+
+Two things here are not in an ordinary shell:
+
+- **The host bridge** (section 11). A small agent on your laptop lets the ESP32
+  shell inspect that machine — battery and live current draw, cameras (including
+  an ASCII preview of a frame), the screen, USB/HID/audio devices, CPU, memory,
+  disks, network, processes.
+- **Fusion mode** (section 12). Rules that wire the two together, in either
+  direction: laptop CPU load driving a GPIO pin, a sensor on the board popping a
+  notification on the laptop.
 
 ---
 
@@ -243,26 +253,32 @@ on/off/sensor-reading messages but not large payloads.
 
 ## 10. Commands
 
-Type `help` for the full grouped list, `help <cmd>` for usage, or `help --esp`
-for the ESP-specific commands. `man`, `whatis` and `apropos` also work.
+Type `help` for the full grouped list, `help <cmd>` for usage, `help --esp`
+for the ESP-specific commands, or `help --host` for the laptop bridge.
+`man`, `whatis` and `apropos` also work.
 
 Highlights:
 
-- **Filesystem:** `ls cd pwd mkdir rmdir touch cp mv rm file stat tree du df
-  basename dirname realpath`
-- **Text:** `cat head tail wc sort uniq cut paste tr tee nl fold fmt od xxd
-  strings diff cmp`
-- **Text digests:** `md5sum sha256sum crc32 base64 rand uuid`
+- **Filesystem:** `ls cd pwd pushd popd dirs mkdir rmdir touch cp mv rm file
+  stat tree du df basename dirname realpath readlink truncate dd sync`
+- **Text:** `cat head tail tac rev shuf wc sort uniq cut paste tr tee nl fold
+  fmt od xxd strings diff cmp comm join expand unexpand column sponge bytes`
+- **Data:** `md5sum sha256sum crc32 cksum base64 rand uuid jq bc factor`
 - **Search / scripting:** `grep rg find locate sed awk xargs which type command
   watch repeat time seq yes true false test [ expr`
 - **Shell built-ins:** `help man clear sh exit alias unalias history`
-- **System:** `uname hostname uptime free whoami id who w passwd ps top pgrep
-  date ntp cal every`
-- **Networking:** `ip wifi ap httpd mqtt ping curl wget dig nslookup ss`
+- **System:** `uname arch nproc hostname uptime free whoami id who w logname tty
+  passwd ps top pgrep printenv date ntp cal every`
+- **Networking:** `ip mac wifi ap httpd mqtt ping curl wget http nc dig nslookup
+  ss portscan netscan mdns`
 - **File transfer:** `send recv` (and `httpd` for a browser)
-- **ESP32:** `tsw pin pinout pinwatch pwm adc dac tone beep servo touchpin led blink
-  sleep deepsleep restart ota dmesg data chip heap temp cpufreq bench nvs
-  neofetch i2cscan i2c wifiscan`
+- **ESP32:** `tsw pin pinout pinwatch pwm adc dac tone beep servo touchpin led
+  blink rgb sleep deepsleep restart ota dmesg data chip heap temp cpufreq bench
+  nvs neofetch i2cscan i2c spi wifiscan efuse parts psram rtcmem wdt`
+- **Sensors / signals:** `dht sonar pulse freq scope logic shiftout`
+- **Laptop bridge:** `host hsys hcpu hmem hdisk hpower hcam hscreen hio hnet
+  hproc hgpu htemp hnotify hexec htype hkey hclip` (section 11)
+- **Fusion mode:** `fuse` (section 12)
 
 ### ESP-specific
 
@@ -329,7 +345,136 @@ it is remembered across reboots.
 every live session, so a job started over Telnet keeps reporting on Serial too.
 Commands that never return (`watch`, another `every`) are refused.
 
-## 11. Honest limitations
+## 11. The host bridge — inspecting your laptop from the shell
+
+The ESP32 cannot see the machine on the other end of the wire, so this is two
+halves: a small agent that runs on the laptop, and the `h*` commands in the
+shell that ask it questions.
+
+### Starting it
+
+```bash
+# on the laptop (Python 3.8+, no required dependencies)
+python tools/espehost.py 192.168.1.42        # or: esp32.local
+```
+
+The laptop dials **out** to the ESP32 on port 2323. That direction is
+deliberate: the board's address is the stable one (mDNS, or the IP printed at
+boot), a laptop's usually is not, and its inbound ports are usually firewalled.
+Your laptop never opens a listening port.
+
+Then, in the shell:
+
+```
+root@esp32:/$ host
+bridge   : listening on port 2323
+agent    : espehost/1.0.0 on ATLAS (Windows)
+peer     : 192.168.1.101
+requests : 14
+caps     : cam caps cpu disk gpu io mem net notify ping power proc screen sys
+
+root@esp32:/$ hpower
+source    AC adapter
+state     charging
+charge    68%
+power     +26.68 W  (26676 mW in)
+current   2143 mA at 12.45 V
+capacity  24532 / 35690 mWh
+
+root@esp32:/$ hcam list
+1 camera(s):
+  [0] HP HD Camera
+
+root@esp32:/$ hcam ascii 0 -w 60      # a frame, rendered as text
+root@esp32:/$ hcam snap 0 -o shot.jpg
+root@esp32:/$ hscreen                 # the display, same treatment
+root@esp32:/$ hio audio               # or: usb hid keyboard mouse display serial
+root@esp32:/$ hproc 10                # top processes
+```
+
+### What it can do
+
+| Command    | Shows                                                          |
+| ---------- | -------------------------------------------------------------- |
+| `hsys`     | OS, build, arch, uptime                                         |
+| `hcpu`     | model, physical/logical cores, per-core load, current clock     |
+| `hmem`     | RAM and swap                                                    |
+| `hdisk`    | mounted filesystems and free space                              |
+| `hpower`   | battery %, charge state, **live current draw in mA and W**      |
+| `hcam`     | `list`, `snap` to a file, `ascii` preview in the terminal       |
+| `hscreen`  | the display as ASCII, or `-o file.png`                          |
+| `hio`      | USB, HID, keyboards, mice, audio endpoints, displays, cameras, bluetooth, printers, disks, and `hio serial` for COM ports |
+| `hnet`     | interfaces and addresses, `hnet conn` for open connections      |
+| `hproc`    | top processes by CPU, `-m` by memory                            |
+| `hgpu`     | graphics adapters, VRAM, current mode                           |
+| `htemp`    | thermal sensors and fans, where the machine exposes them        |
+| `hnotify`  | pops a desktop notification on the laptop                       |
+
+`host caps` asks the agent what it actually supports, and `host raw <op> [args]`
+sends anything through — so a capability added to the agent does **not** need a
+firmware reflash.
+
+### Observing vs. controlling
+
+Everything above only reads the machine, and is on by default. Anything that can
+*change* the laptop's state is off until you ask for it by name:
+
+```bash
+python tools/espehost.py esp32.local --allow-input   # htype, hkey, hclip
+python tools/espehost.py esp32.local --allow-exec    # hexec
+python tools/espehost.py esp32.local --no-screen     # opt out of hscreen
+```
+
+### Optional extras
+
+The agent works with the standard library alone, and does more with these:
+
+```bash
+pip install psutil           # per-core CPU, real process list, sensors
+pip install opencv-python    # hcam
+pip install mss              # hscreen (Pillow also works)
+pip install pyautogui pyperclip   # htype / hkey / hclip
+```
+
+`python tools/test_bridge.py` runs the protocol end to end against a stand-in
+for the ESP32, if you want to check the agent without flashing anything.
+
+---
+
+## 12. Fusion mode (`fuse`) — the two machines as one system
+
+A rule is `<source> <comparator> <threshold>` → `<any shell command>`. Because
+the source can be on either side and the action is an ordinary shell line,
+either machine can drive the other.
+
+```
+fuse add host.cpu gt 80 led on                 # laptop busy   -> board LED
+fuse add host.power lt 20 pwm 13 255           # battery low   -> buzzer
+fuse add adc.34 gt 2000 hnotify "light!"       # board sensor  -> laptop toast
+fuse add pin.4 eq 1 hkey ctrl shift t          # a button      -> keystroke
+fuse on
+```
+
+`fuse sources` lists what you can read: `pin.N adc.N touch.N heap temp rssi
+uptime`, and `host.<op>` for anything the agent reports a number for
+(`host.cpu`, `host.mem`, `host.power`, `host.disk`, ...).
+
+Three things worth knowing:
+
+- **Comparators are words** — `gt lt ge le eq ne`. A bare `>` never reaches the
+  command; the shell's redirection parser takes it first.
+- **Rules are edge-triggered.** The action runs when the condition *becomes*
+  true, not on every poll while it stays true. `--level` opts into the latter.
+- **Host rules cost a round-trip.** Evaluation runs on the same loop that serves
+  the shell, so only one host-backed rule is checked per tick, round-robin.
+  `fuse every <secs>` sets the interval (default 5s).
+
+`fuse save` writes `/fuse.rules` in exactly the syntax `fuse add` takes, and
+rules reload automatically at boot.
+
+---
+
+## 13. Honest limitations
 
 An ESP32 is not a Linux box, so some commands are **stubs** that print why they
 can't run (they're still listed in `help` so nothing silently vanishes):
@@ -368,8 +513,27 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
   password - start it when you need it, `httpd stop` when you don't.
 - `every` jobs are RAM-only and run from the main loop, so they are paced by it
   and disappear on reboot (re-add them from `/boot.sh`).
+- The **host bridge port has no authentication.** Anything on your LAN can
+  connect to it and pretend to be the agent, which lets it feed the board false
+  readings and fire fusion rules. It cannot read your laptop — that needs a
+  shell session, which is password-protected — but treat the bridge as trusted
+  only on a network you trust. Point `espehost.py` at the right address, too: it
+  sends whatever it is asked for to whoever answers.
+- `hexec`, `htype`, `hkey` and `hclip` let the board act on the laptop. They are
+  off unless the agent was started with `--allow-exec` / `--allow-input`.
+- `htemp` fails on most consumer laptops: Windows rarely exposes thermal zones
+  without vendor drivers. It says so rather than reporting 0 C.
+- `freq` is polled rather than interrupt-driven, so it tops out around 100 kHz.
+- `dht`, `sonar` and the other bit-banged sensor protocols are timing-sensitive;
+  a WiFi interrupt landing mid-frame is the usual cause of a failed read, which
+  is why `dht` retries.
+- `bc` is double-precision throughout; `%` and the bitwise operators truncate to
+  integer first, as bc does.
+- `jq` reads one field (`.a.b`, `.arr[0]`) — it is not a JSON query engine.
+- `rgb` needs a WS2812 wired up; the plain DevKit V1 has no addressable LED
+  (`ESPE_RGB_LED_PIN` in `config.h` sets where it looks).
 
-## 12. Project layout
+## 14. Project layout
 
 | File              | Contents                                                |
 | ----------------- | ------------------------------------------------------- |
@@ -393,6 +557,26 @@ And some are **useful subsets or scoped-down**, noted in `help`/their own output
 | `script_cmds.cpp` | `watch repeat time seq yes true false test expr`         |
 | `cron_cmds.cpp`   | `every` - repeating background jobs                      |
 | `httpd_cmds.cpp`  | `httpd` - LittleFS web browser / uploader                |
+| `text2_cmds.cpp`  | `comm join expand unexpand column sponge truncate bytes` |
+| `calc_cmds.cpp`   | `bc factor cksum jq dd`                                  |
+| `sensor_cmds.cpp` | `dht sonar pulse freq scope logic shiftout rgb spi`      |
+| `espinfo_cmds.cpp`| `efuse parts psram rtcmem wdt` + small POSIX leftovers   |
+| `net2_cmds.cpp`   | `nc http portscan netscan mdns`                          |
+| `host_cmds.cpp`   | host bridge transport + the `h*` laptop commands         |
+| `fuse_cmds.cpp`   | `fuse` - fusion-mode rule engine                         |
+| `tools/espehost.py` | the laptop agent (see section 11)                      |
+| `tools/test_bridge.py` | end-to-end bridge test, no hardware needed          |
+| `tools/test_calc.sh`   | native unit tests for the `bc` parser               |
+| `tools/build.sh`  | compile via the arduino-cli bundled with the IDE         |
 
 New commands are added by writing a handler and appending it to that module's
-`Command[]` table — the `help` listing updates automatically.
+`Command[]` table — the `help` listing updates automatically. A new module needs
+its table declared in `shell.h` and listed in `CMD_TABLES` in `shell.cpp`.
+
+### Tests
+
+```bash
+bash tools/build.sh        # compile (first run ~4 min, then ~30s)
+bash tools/test_calc.sh    # bc expression parser, natively compiled
+python tools/test_bridge.py  # host bridge protocol, end to end
+```
