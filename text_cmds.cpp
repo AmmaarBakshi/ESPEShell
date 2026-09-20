@@ -57,6 +57,20 @@ static int cmd_tac(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// ---- rev -------------------------------------------------------------------
+static int cmd_rev(int argc, char **argv, ShellIO &io) {
+  std::vector<String> files; fileArgs(argc, argv, files);
+  String data;
+  if (!getInput(io, files, data)) return 0;
+  std::vector<String> lines; splitLines(data, lines);
+  for (auto &l : lines) {
+    String r; r.reserve(l.length());
+    for (int i = (int)l.length(); i-- > 0; ) r += l[i];
+    io.out.println(r);
+  }
+  return 0;
+}
+
 // ---- head / tail -----------------------------------------------------------
 static int headTail(int argc, char **argv, ShellIO &io, bool head) {
   int count = 10;
@@ -475,6 +489,7 @@ const Command TEXT_CMDS[] = {
   {"more",    cmd_cat,     "more [file]",          "page through text (no pager: cat)", G_TEXT},
   {"less",    cmd_cat,     "less [file]",          "page through text (no pager: cat)", G_TEXT},
   {"tac",     cmd_tac,     "tac [file...]",        "print lines in reverse order",      G_TEXT},
+  {"rev",     cmd_rev,     "rev [file...]",        "reverse the characters of each line",G_TEXT},
   {"head",    cmd_head,    "head [-n N] [file]",   "first N lines (default 10)",        G_TEXT},
   {"tail",    cmd_tail,    "tail [-n N] [file]",   "last N lines (default 10)",         G_TEXT},
   {"wc",      cmd_wc,      "wc [-lwc] [file]",     "count lines, words, characters",    G_TEXT},
