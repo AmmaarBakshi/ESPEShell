@@ -359,7 +359,62 @@ static int cmd_host(int argc, char **argv, ShellIO &io) {
   return 1;
 }
 
+// ---- the h* family ---------------------------------------------------------
+// Each of these is the same three lines - ask the agent, print the reply - so
+// rather than eighteen near-identical functions there is one that looks up the
+// op by the name it was invoked as. Aliases (hbat -> power) fall out for free,
+// and adding a command is one row here plus one in the table below.
+static const struct { const char *cmd; const char *op; } HOST_OPS[] = {
+  {"hping",   "ping"},
+  {"hsys",    "sys"},
+  {"hcpu",    "cpu"},
+  {"hmem",    "mem"},
+  {"hdisk",   "disk"},
+  {"hpower",  "power"},
+  {"hbat",    "power"},
+  {"hcam",    "cam"},
+  {"hscreen", "screen"},
+  {"hio",     "io"},
+  {"hnet",    "net"},
+  {"hproc",   "proc"},
+  {"hgpu",    "gpu"},
+  {"htemp",   "temp"},
+  {"hnotify", "notify"},
+  {"hexec",   "exec"},
+  {"htype",   "type"},
+  {"hkey",    "key"},
+  {"hclip",   "clip"},
+};
+
+static int cmd_hostOp(int argc, char **argv, ShellIO &io) {
+  for (const auto &entry : HOST_OPS)
+    if (strcmp(entry.cmd, argv[0]) == 0) return hostRun(entry.op, argc, argv, 1, io);
+  // Only reachable if the table above and the one below disagree.
+  io.out.print(argv[0]);
+  io.out.println(F(": not mapped to a host op"));
+  return 1;
+}
+
 const Command HOST_CMDS[] = {
-  {"host", cmd_host, "host [status|caps|raw <op>|drop]", "laptop bridge link status", G_HOST},
+  {"host",    cmd_host,   "host [status|caps|raw <op>|drop]", "laptop bridge link status", G_HOST},
+  {"hping",   cmd_hostOp, "hping",                 "round-trip test to the laptop agent",  G_HOST},
+  {"hsys",    cmd_hostOp, "hsys",                  "laptop OS, arch, uptime",              G_HOST},
+  {"hcpu",    cmd_hostOp, "hcpu",                  "laptop CPU model and per-core load",   G_HOST},
+  {"hmem",    cmd_hostOp, "hmem",                  "laptop RAM and swap usage",            G_HOST},
+  {"hdisk",   cmd_hostOp, "hdisk",                 "laptop filesystems and free space",    G_HOST},
+  {"hpower",  cmd_hostOp, "hpower [--watts]",      "laptop battery, charge, current draw", G_HOST},
+  {"hbat",    cmd_hostOp, "hbat",                  "laptop battery (alias of hpower)",     G_HOST},
+  {"hcam",    cmd_hostOp, "hcam [list|snap|ascii]","laptop cameras: list, snap, preview",  G_HOST},
+  {"hscreen", cmd_hostOp, "hscreen [-w N] [-o f]", "laptop display as ASCII, or to PNG",   G_HOST},
+  {"hio",     cmd_hostOp, "hio [usb|hid|audio|serial|..]", "laptop input/output devices",  G_HOST},
+  {"hnet",    cmd_hostOp, "hnet [conn] [-a]",      "laptop interfaces and connections",    G_HOST},
+  {"hproc",   cmd_hostOp, "hproc [N] [-m]",        "laptop top processes",                 G_HOST},
+  {"hgpu",    cmd_hostOp, "hgpu",                  "laptop graphics adapters",             G_HOST},
+  {"htemp",   cmd_hostOp, "htemp",                 "laptop thermal sensors and fans",      G_HOST},
+  {"hnotify", cmd_hostOp, "hnotify <text>",        "pop a notification on the laptop",     G_HOST},
+  {"hexec",   cmd_hostOp, "hexec <cmd...>",        "run a command (agent --allow-exec)",   G_HOST},
+  {"htype",   cmd_hostOp, "htype <text>",          "type text (agent --allow-input)",      G_HOST},
+  {"hkey",    cmd_hostOp, "hkey <key...>",         "press keys (agent --allow-input)",     G_HOST},
+  {"hclip",   cmd_hostOp, "hclip [text]",          "clipboard (agent --allow-input)",      G_HOST},
 };
 const size_t HOST_CMDS_N = sizeof(HOST_CMDS) / sizeof(HOST_CMDS[0]);
