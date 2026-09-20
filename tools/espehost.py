@@ -493,6 +493,37 @@ CAM_WARMUP_S = 1.2
 # enough that the shell does not appear to hang.
 PROC_SAMPLE_S = 0.4
 
+# Caps on what a single reply may carry back over the bridge. The ESP32 buffers
+# one line at a time (HOST_BRIDGE_LINE_MAX in config.h, 8 KB), so anything
+# bigger than this would be silently cut mid-line at the far end.
+EXEC_TIMEOUT_S = 20.0
+EXEC_OUTPUT_MAX = 4000
+CLIP_MAX = 2000
+
+
+def ascii_art(gray, cols: int, rows: int, stretch: bool = True) -> Tuple[str, float, bool]:
+    """Map an already-resized 2-D array of 0..255 to the character ramp.
+
+    Returns (art, mean, featureless). Shared by `cam` and `screen` so both
+    previews read identically in the terminal.
+    """
+    flat = [int(px) for row in gray for px in row]
+    mean = sum(flat) / len(flat) if flat else 0.0
+    lo, hi = (min(flat), max(flat)) if flat else (0, 0)
+    featureless = hi - lo <= 4
+
+    span = (hi - lo) if (stretch and not featureless) else 255
+    base = lo if (stretch and not featureless) else 0
+    scale = len(ASCII_RAMP) - 1
+
+    lines = []
+    for r in range(rows):
+        row = flat[r * cols:(r + 1) * cols]
+        lines.append("".join(
+            ASCII_RAMP[max(0, min(scale, (px - base) * scale // max(span, 1)))]
+            for px in row))
+    return "\n".join(lines), mean, featureless
+
 
 def _cv2():
     try:
@@ -620,24 +651,10 @@ def op_cam(args: List[str]) -> Reply:
         rows = max(8, int(cols * h / w / 2))
         small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (cols, rows),
                            interpolation=cv2.INTER_AREA)
-        mean = float(small.mean())
-        lo, hi = float(small.min()), float(small.max())
-
-        # Ten ramp characters over the full 0-255 range wastes most of them on
-        # a dim scene. Stretch to the range actually present unless asked not
-        # to, so an indoor frame is legible instead of a block of spaces.
-        shown = small
-        if "--raw" not in rest and hi - lo > 4:
-            shown = cv2.normalize(small, None, 0, 255, cv2.NORM_MINMAX)
-
-        scale = len(ASCII_RAMP) - 1
-        art = "\n".join(
-            "".join(ASCII_RAMP[int(px) * scale // 255] for px in row)
-            for row in shown
-        )
+        art, mean, featureless = ascii_art(small, cols, rows, stretch="--raw" not in rest)
 
         header = f"camera [{index}]  {w}x{h} -> {cols}x{rows}  mean {mean:.0f}/255"
-        if hi - lo <= 4:
+        if featureless:
             # Otherwise this prints as a blank rectangle and looks like a bug.
             header += "\n(frame is featureless - privacy shutter closed, or a dark room)"
         return Reply(f"{header}\n{art}", mean)
@@ -910,6 +927,180 @@ def op_gpu(args: List[str]) -> Reply:
     raise OpError("no GPU information available")
 
 
+# ---- screen ------------------------------------------------------------------
+
+def _grab_screen():
+    """(pixels_rgb_image, width, height) for the primary display."""
+    try:
+        import mss  # type: ignore
+        from PIL import Image  # type: ignore
+        with mss.mss() as sct:
+            shot = sct.grab(sct.monitors[1])       # [0] is the union of all
+            return Image.frombytes("RGB", shot.size, shot.rgb), shot.width, shot.height
+    except ImportError:
+        pass
+    try:
+        from PIL import ImageGrab  # type: ignore
+        img = ImageGrab.grab()
+        return img.convert("RGB"), img.width, img.height
+    except ImportError:
+        raise OpError("screen capture needs mss or Pillow (pip install mss)")
+    except OSError as exc:
+        raise OpError(f"screen capture failed: {exc}")
+
+
+def op_screen(args: List[str]) -> Reply:
+    """capture the display (ASCII preview, or save a PNG)"""
+    img, width, height = _grab_screen()
+
+    path = _arg_value(args, "-o")
+    if path or "save" in args:
+        path = path or os.path.join(os.path.expanduser("~"),
+                                    f"espeshell-screen-{int(time.time())}.png")
+        img.save(path)
+        size = os.path.getsize(path)
+        return Reply(table([
+            ("size", f"{width}x{height}"),
+            ("saved", path),
+            ("bytes", human_bytes(size)),
+        ]), size)
+
+    cols = int(_arg_value(args, "-w") or 78)
+    cols = max(16, min(cols, 120))
+    rows = max(8, int(cols * height / width / 2))
+    gray = img.convert("L").resize((cols, rows))
+    grid = [[gray.getpixel((x, y)) for x in range(cols)] for y in range(rows)]
+
+    art, mean, featureless = ascii_art(grid, cols, rows, stretch="--raw" not in args)
+    header = f"screen {width}x{height} -> {cols}x{rows}  mean {mean:.0f}/255"
+    if featureless:
+        header += "\n(display is blank or asleep)"
+    return Reply(f"{header}\n{art}", mean)
+
+
+# ---- notifications -----------------------------------------------------------
+
+def op_notify(args: List[str]) -> Reply:
+    """pop a desktop notification on the laptop"""
+    message = " ".join(args).strip() or "ESPEShell"
+    if IS_WINDOWS:
+        safe = message.replace("'", "''")
+        # Fire and forget: a balloon that we waited on would block the agent.
+        # NotifyIcon needs a live message pump, hence the Sleep before dispose.
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+             "-Command",
+             "Add-Type -AssemblyName System.Windows.Forms;"
+             "$n = New-Object System.Windows.Forms.NotifyIcon;"
+             "$n.Icon = [System.Drawing.SystemIcons]::Information;"
+             "$n.BalloonTipTitle = 'ESPEShell';"
+             f"$n.BalloonTipText = '{safe}';"
+             "$n.Visible = $true; $n.ShowBalloonTip(5000);"
+             "Start-Sleep -Seconds 6; $n.Dispose()"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    elif IS_MAC:
+        safe = message.replace('"', '\\"')
+        subprocess.Popen(["osascript", "-e",
+                          f'display notification "{safe}" with title "ESPEShell"'])
+    elif shutil.which("notify-send"):
+        subprocess.Popen(["notify-send", "ESPEShell", message])
+    else:
+        raise OpError("no notification mechanism (install libnotify / notify-send)")
+    return Reply(f"notified: {message}")
+
+
+# ---- control ops (opt-in: these act on the laptop rather than observe it) ----
+
+def op_exec(args: List[str]) -> Reply:
+    """run a shell command on the laptop (needs --allow-exec)"""
+    if not args:
+        raise OpError("exec: nothing to run")
+    cmd = " ".join(args)
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                           timeout=EXEC_TIMEOUT_S,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                           if IS_WINDOWS else 0)
+    except subprocess.TimeoutExpired:
+        raise OpError(f"exec: timed out after {EXEC_TIMEOUT_S}s")
+    except OSError as exc:
+        raise OpError(f"exec: {exc}")
+
+    out = (p.stdout or "") + (p.stderr or "")
+    out = out.strip() or f"(no output, exit {p.returncode})"
+    if len(out) > EXEC_OUTPUT_MAX:
+        out = out[:EXEC_OUTPUT_MAX] + f"\n... truncated at {EXEC_OUTPUT_MAX} bytes"
+    return Reply(out, p.returncode)
+
+
+def op_type(args: List[str]) -> Reply:
+    """type text into the focused window (needs --allow-input)"""
+    if not args:
+        raise OpError("type: nothing to type")
+    try:
+        import pyautogui  # type: ignore
+    except ImportError:
+        raise OpError("keystroke injection needs pyautogui (pip install pyautogui)")
+    text = " ".join(args)
+    pyautogui.typewrite(text, interval=0.01)
+    return Reply(f"typed {len(text)} character(s) into the focused window", len(text))
+
+
+def op_key(args: List[str]) -> Reply:
+    """press keys, e.g. 'key ctrl c' (needs --allow-input)"""
+    if not args:
+        raise OpError("key: no keys given")
+    try:
+        import pyautogui  # type: ignore
+    except ImportError:
+        raise OpError("keystroke injection needs pyautogui (pip install pyautogui)")
+    keys = [k.lower() for k in args]
+    if len(keys) == 1:
+        pyautogui.press(keys[0])
+    else:
+        pyautogui.hotkey(*keys)          # several keys means a chord
+    return Reply("pressed " + "+".join(keys))
+
+
+def op_clip(args: List[str]) -> Reply:
+    """read or set the clipboard (needs --allow-input)"""
+    try:
+        import pyperclip  # type: ignore
+    except ImportError:
+        raise OpError("clipboard access needs pyperclip (pip install pyperclip)")
+    if args:
+        pyperclip.copy(" ".join(args))
+        return Reply("clipboard set")
+    text = pyperclip.paste() or ""
+    if len(text) > CLIP_MAX:
+        text = text[:CLIP_MAX] + f"\n... truncated at {CLIP_MAX} bytes"
+    return Reply(text or "(clipboard empty)", len(text))
+
+
+# Registered from main() once the flags are known, because the decorator runs
+# at import time and cannot see them.
+OBSERVE_OPS = [
+    ("screen", "capture the display as an ASCII preview or PNG", op_screen),
+    ("notify", "pop a desktop notification on the laptop", op_notify),
+]
+CONTROL_OPS = [
+    ("type", "type text into the focused window", op_type),
+    ("key", "press a key or chord", op_key),
+    ("clip", "read or set the clipboard", op_clip),
+]
+EXEC_OPS = [
+    ("exec", "run a shell command on the laptop", op_exec),
+]
+
+
+def register(entries, why: str) -> None:
+    for name, help_text, fn in entries:
+        OPS[name] = fn
+        OP_HELP[name] = help_text
+    del why
+
+
 # ============================================================================
 #  Agent
 # ============================================================================
@@ -1042,8 +1233,23 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="seconds between reconnect attempts, 0 to exit instead")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="log every request and reply")
+    ap.add_argument("--no-screen", action="store_true",
+                    help="do not expose screen capture")
+    ap.add_argument("--allow-input", action="store_true",
+                    help="let the shell type keys and use the clipboard")
+    ap.add_argument("--allow-exec", action="store_true",
+                    help="let the shell run commands on this laptop")
     ap.add_argument("-V", "--version", action="version", version=f"espehost {__version__}")
     opts = ap.parse_args(argv)
+
+    # Observing the laptop is the default; acting on it is not. Anything that
+    # can change state on this machine stays off until it is asked for by name.
+    register([e for e in OBSERVE_OPS if not (opts.no_screen and e[0] == "screen")],
+             "observe")
+    if opts.allow_input:
+        register(CONTROL_OPS, "input")
+    if opts.allow_exec:
+        register(EXEC_OPS, "exec")
 
     agent = Agent(opts.host, opts.port, retry=opts.retry, verbose=opts.verbose)
     try:
