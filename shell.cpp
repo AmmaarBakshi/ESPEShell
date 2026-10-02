@@ -16,6 +16,9 @@ uint32_t g_bytesOut = 0;
 
 static int s_lastStatus = 0;   // $? - exit status of the last pipeline run
 
+bool g_optErrexit = false;     // set -e
+bool g_optXtrace  = false;     // set -x
+
 // Bulk-read tunables (see readFileToString).
 static const size_t READ_CHUNK    = 512;    // bytes per LittleFS read
 static const size_t READ_HEADROOM = 8192;   // heap left free after the slurp
@@ -802,6 +805,14 @@ static int runPipeline(const String &line, Print &realOut, Stream *rawIn) {
     argv.reserve(args.size());
     for (auto &a : args) argv.push_back((char *)a.c_str());
 
+    // set -x: show what actually runs, after expansion. Always to the
+    // terminal, never into a pipe, the way sh sends it to stderr.
+    if (g_optXtrace) {
+      realOut.print(F("+"));
+      for (auto &a : args) { realOut.print(' '); realOut.print(a); }
+      realOut.println();
+    }
+
     const Command *c = findCommand(argv[0]);
     if (!c) {
       realOut.print(argv[0]);
@@ -1083,20 +1094,50 @@ static int cmd_exit(int argc, char **argv, ShellIO &io) {
 
 // ---- sh : run stored shell commands from a LittleFS file -------------------
 // Also used to auto-run /boot.sh at startup (see ESPEShell.ino's setup()).
-static int cmd_sh(int argc, char **argv, ShellIO &io) {
-  if (argc < 2) { io.out.println(F("usage: sh <file>   (runs one shell command per line)")); return 1; }
+// The live connection is passed through, so `read` in a script can prompt.
+// With `set -e` the script stops at the first line that ends in failure; a
+// line like `test -f x || echo missing` ends in success, so it does not.
+static int runScript(const char *name, ShellIO &io) {
+  // A script that runs itself would otherwise recurse until the stack is gone.
+  static int depth = 0;
+  if (depth >= 8) { io.out.print(name); io.out.println(F(": scripts nested too deep")); return 1; }
+
   String content;
-  if (!readFileToString(resolvePath(argv[1]), content, &io.out, argv[1])) return 1;
+  if (!readFileToString(resolvePath(name), content, &io.out, name)) return 1;
 
   std::vector<String> lines;
   splitLines(content, lines);
   int rc = 0;
-  for (auto &l : lines) {
-    String t = l; t.trim();
+  depth++;
+  for (size_t n = 0; n < lines.size(); ++n) {
+    String t = lines[n]; t.trim();
     if (t.length() == 0 || t[0] == '#') continue;  // blank lines / comments
-    rc = runLine(l, io.out);
+    rc = runLine(lines[n], io.out, io.rawIn);
+    if (rc != 0 && g_optErrexit) {
+      io.out.printf("%s: line %u failed (exit %d) - stopping, set -e is on\n",
+                    name, (unsigned)(n + 1), rc);
+      break;
+    }
   }
+  depth--;
   return rc;
+}
+
+// `sh` runs a script with its own options: a `set -e` inside it does not
+// stay switched on at the prompt afterwards. `source` (and `.`) runs it as
+// if typed here, so what it sets - options included - stays set.
+static int cmd_sh(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: sh <file>   (runs one shell command per line)")); return 1; }
+  const bool errexit = g_optErrexit, xtrace = g_optXtrace;
+  int rc = runScript(argv[1], io);
+  g_optErrexit = errexit;
+  g_optXtrace = xtrace;
+  return rc;
+}
+
+static int cmd_source(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.print(argv[0]); io.out.println(F(": usage: source <file>")); return 1; }
+  return runScript(argv[1], io);
 }
 
 const Command CORE_CMDS[] = {
@@ -1109,6 +1150,8 @@ const Command CORE_CMDS[] = {
   {"history", cmd_history, "history [-c]",        "list (or clear) the command history",  G_CORE},
   {"clear",   cmd_clear,   "clear",               "clear the screen",                    G_CORE},
   {"sh",      cmd_sh,      "sh <file>",           "run stored shell commands from a file",G_CORE},
+  {"source",  cmd_source,  "source <file>",       "run a file's commands in this shell", G_CORE},
+  {".",       cmd_source,  ". <file>",            "run a file's commands in this shell", G_CORE},
   {"exit",    cmd_exit,    "exit",                "end this session (Telnet)",           G_CORE},
   {"logout",  cmd_exit,    "logout",              "end this session (Telnet)",           G_CORE},
 };

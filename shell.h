@@ -108,6 +108,10 @@ extern uint32_t g_bytesIn;    // bytes received across sessions
 extern uint32_t g_bytesOut;   // bytes sent across sessions (main loop only:
                               // nothing here runs in an ISR, so no volatile)
 
+// ---- Shell options (`set -e` / `set -x`, defined in shell.cpp) -------------
+extern bool g_optErrexit;     // `sh` stops a script at its first failing line
+extern bool g_optXtrace;      // each command is echoed, expanded, before it runs
+
 // ---- Environment variables -------------------------------------------------
 String envGet(const String &key);
 void   envSet(const String &key, const String &val);

@@ -321,6 +321,125 @@ static int cmd_export(int argc, char **argv, ShellIO &io) {
   return 0;
 }
 
+// Removing a variable that was never set is not an error, as in sh.
+static int cmd_unset(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) { io.out.println(F("usage: unset NAME...")); return 1; }
+  for (int i = 1; i < argc; ++i) envUnset(argv[i]);
+  return 0;
+}
+
+// ---- set : shell options, or the variables when given nothing ---------------
+static int cmd_set(int argc, char **argv, ShellIO &io) {
+  if (argc < 2) return cmd_env(argc, argv, io);
+  int rc = 0;
+  for (int i = 1; i < argc; ++i) {
+    String a = argv[i];
+    if (a == "-o") {
+      io.out.printf("errexit   %s\n", g_optErrexit ? "on" : "off");
+      io.out.printf("xtrace    %s\n", g_optXtrace ? "on" : "off");
+      continue;
+    }
+    if (a.length() < 2 || (a[0] != '-' && a[0] != '+')) {
+      io.out.print(F("set: ")); io.out.print(a); io.out.println(F(": expected -e, -x, +e, +x or -o"));
+      rc = 1;
+      continue;
+    }
+    const bool on = (a[0] == '-');
+    for (unsigned k = 1; k < a.length(); ++k) {
+      if (a[k] == 'e') g_optErrexit = on;
+      else if (a[k] == 'x') g_optXtrace = on;
+      else { io.out.printf("set: -%c: not supported (only -e and -x)\n", a[k]); rc = 1; }
+    }
+  }
+  return rc;
+}
+
+// ---- read : one line of input into variables ---------------------------------
+// Reads a line typed on the live connection - with echo, backspace, Ctrl-C to
+// cancel - or, in a pipeline, the first line of the piped input. Unlike sh,
+// a piped read does set the variable: there is no subshell here to lose it in.
+//
+// Returns 0 with a line, 1 on Ctrl-C, 2 on timeout.
+static int readTyped(Stream &in, Print &echo, String &line, bool silent, unsigned long timeoutMs) {
+  const unsigned long t0 = millis();
+  int iac = 0, esc = 0;
+  for (;;) {
+    while (in.available()) {
+      uint8_t b = (uint8_t)in.read();
+      g_bytesIn++;
+      if (iac == 1) { iac = (b >= 251 && b <= 254) ? 2 : 0; continue; }   // telnet options
+      if (iac == 2) { iac = 0; continue; }
+      if (b == 255) { iac = 1; continue; }
+      if (esc == 1) { esc = (b == '[') ? 2 : 0; continue; }             // arrow keys
+      if (esc == 2) { esc = 0; continue; }
+      if (b == 0x1b) { esc = 1; continue; }
+
+      if (b == '\r' || b == '\n') {
+        echo.println();
+        // Swallow the LF (or telnet's NUL) after a CR, or the prompt that
+        // follows would see it as an empty line of its own.
+        const unsigned long t1 = millis();
+        while (b == '\r' && millis() - t1 < 20) {
+          if (in.available()) {
+            int p = in.peek();
+            if (p == '\n' || p == 0) { in.read(); g_bytesIn++; }
+            break;
+          }
+          delay(1);
+        }
+        return 0;
+      }
+      if (b == 0x03) { echo.println(F("^C")); return 1; }
+      if (b == 0x08 || b == 0x7f) {
+        if (line.length()) {
+          line.remove(line.length() - 1);
+          if (!silent) echo.print(F("\b \b"));
+        }
+        continue;
+      }
+      if (b >= 0x20 && b < 0x7f) {
+        line.concat((char)b);
+        if (!silent) echo.write(b);
+      }
+    }
+    if (timeoutMs && millis() - t0 >= timeoutMs) { echo.println(); return 2; }
+    delay(2);
+  }
+}
+
+static int cmd_read(int argc, char **argv, ShellIO &io) {
+  ArgScan args(argc, argv, "-p -t");
+  String line;
+  if (io.hasIn()) {
+    int nl = io.in->indexOf('\n');
+    line = (nl < 0) ? *io.in : io.in->substring(0, nl);
+    line.replace("\r", "");
+  } else if (io.rawIn) {
+    io.out.print(args.value("-p"));
+    int r = readTyped(*io.rawIn, io.out, line, args.has("-s"),
+                      (unsigned long)args.number("-t", 0) * 1000UL);
+    if (r != 0) return 1;
+  } else {
+    io.out.println(F("read: no input here (not a live session, nothing piped)"));
+    return 1;
+  }
+
+  std::vector<String> names = args.operands;
+  if (names.empty()) { envSet("REPLY", line); return 0; }   // REPLY keeps the line as typed
+
+  // Split on whitespace; the last name takes whatever is left over.
+  line.trim();
+  for (size_t i = 0; i < names.size(); ++i) {
+    if (i + 1 == names.size()) { envSet(names[i], line); break; }
+    int sp = 0;
+    while (sp < (int)line.length() && line[sp] != ' ' && line[sp] != '\t') sp++;
+    envSet(names[i], line.substring(0, sp));
+    line = line.substring(sp);
+    line.trim();
+  }
+  return 0;
+}
+
 static String interpEscapes(const String &s) {
   String o;
   for (size_t i = 0; i < s.length(); ++i) {
@@ -481,6 +600,9 @@ const Command NET_CMDS[] = {
   {"sftp",       cmd_ssh_stub,   "sftp ...",             "(use curl/wget instead)",       G_NET},
   {"env",        cmd_env,        "env",                  "print environment variables",   G_ENV},
   {"export",     cmd_export,     "export NAME=VAL",      "set an environment variable",   G_ENV},
+  {"unset",      cmd_unset,      "unset NAME...",        "remove environment variables",  G_ENV},
+  {"set",        cmd_set,        "set [-e|-x|+e|+x|-o]", "shell options, or list variables", G_ENV},
+  {"read",       cmd_read,       "read [-p prompt] [-s] [-t secs] [NAME...]", "read a line into variables", G_ENV},
   {"echo",       cmd_echo,       "echo [-ne] text",      "print text",                    G_ENV},
   {"printf",     cmd_printf,     "printf FMT [args]",    "formatted print",               G_ENV},
 };
