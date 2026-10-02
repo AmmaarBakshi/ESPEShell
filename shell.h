@@ -191,7 +191,6 @@ bool collectInput(int argc, char **argv, int firstFileArg, ShellIO &io, String &
 void splitLines(const String &s, std::vector<String> &lines);
 bool matchWild(const String &text, const String &pat);   // glob: * and ?
 String humanBytes(uint64_t n);
-String expandVars(const String &s);
 String toUnixEol(const String &s);   // strip CR: terminals need \r\n, files want \n
 bool   shellWait(ShellIO &io, int ms);   // delay(ms), aborting early on Ctrl-C (returns true)
 
@@ -257,7 +256,7 @@ String mqttPopPending();    // pops the oldest pending message, formatted "topic
 
 // ---- Dispatch --------------------------------------------------------------
 const Command *findCommand(const char *name);
-int  runLine(const String &line, Print &realOut, Stream *rawIn = nullptr);   // pipes + redirection
+int  runLine(const String &line, Print &realOut, Stream *rawIn = nullptr);   // ; && || | < > >>
 String runCapture(const String &line);   // run with the output captured, not printed
 void printPrompt(Print &out);
 void printBanner(Print &out);

@@ -13,6 +13,8 @@ String g_telnetPeer = "";
 uint32_t g_bytesIn = 0;
 uint32_t g_bytesOut = 0;
 
+static int s_lastStatus = 0;   // $? - exit status of the last pipeline run
+
 // Bulk-read tunables (see readFileToString).
 static const size_t READ_CHUNK    = 512;    // bytes per LittleFS read
 static const size_t READ_HEADROOM = 8192;   // heap left free after the slurp
@@ -419,27 +421,6 @@ bool shellWait(ShellIO &io, int ms) {
   }
 }
 
-String expandVars(const String &s) {
-  String r;
-  r.reserve(s.length());   // the common case is a line with no substitutions
-  for (size_t i = 0; i < s.length();) {
-    char c = s[i];
-    if (c == '$' && i + 1 < s.length()) {
-      size_t j = i + 1;
-      bool brace = false;
-      if (s[j] == '{') { brace = true; j++; }
-      String name;
-      while (j < s.length() && (isalnum((int)s[j]) || s[j] == '_')) { name += s[j]; j++; }
-      if (brace && j < s.length() && s[j] == '}') j++;
-      if (name.length()) { r += envGet(name); i = j; }
-      else { r += c; i++; }
-    } else {
-      r += c; i++;
-    }
-  }
-  return r;
-}
-
 // ============================================================================
 //  Output capture (for pipes / redirection)
 // ============================================================================
@@ -498,14 +479,49 @@ const char *groupName(uint8_t g) {
 }
 
 // ============================================================================
-//  Tokenizer, pipe split, redirection
+//  Tokenizer, pipe split, command lists, redirection
+//
+//  A line is cut in three passes, each one quote- and backslash-aware so an
+//  operator inside '...' or "..." or after a \ is just text:
+//    splitList()  ;  &&  ||     -> pipelines, run left to right
+//    splitPipes() |             -> stages of one pipeline
+//    tokenize()   whitespace    -> argv, expanding $VAR, ${VAR}, $? and ~
+//  Expansion happens in the last pass, at the moment a stage runs, so in
+//  `export X=1; echo $X` the echo sees the value the export just set.
 // ============================================================================
+
+// Parses the expansion that starts at s[i] == '$'. Stores its value and
+// returns the index just past it, or returns `i` when the '$' is literal:
+// `$5`, `$(`, a lone `$` or `x$` at the end of a grep pattern. There are no
+// positional parameters, so leaving `$1` alone keeps "{print $1}" meaning
+// the same thing to awk whichever quotes it arrived in.
+static size_t parseDollar(const String &s, size_t i, String &val) {
+  const size_t n = s.length();
+  size_t j = i + 1;
+  if (j >= n) return i;
+  if (s[j] == '?') { val = String(s_lastStatus); return j + 1; }
+  const bool brace = (s[j] == '{');
+  if (brace) j++;
+  if (j >= n || !(isalpha((int)s[j]) || s[j] == '_')) return i;
+  size_t k = j;
+  while (k < n && (isalnum((int)s[k]) || s[k] == '_')) k++;
+  const String name = s.substring(j, k);
+  if (brace) {
+    if (k >= n || s[k] != '}') return i;
+    k++;
+  }
+  val = envGet(name);
+  return k;
+}
+
 static std::vector<String> splitPipes(const String &line) {
   std::vector<String> segs;
   String cur;
   char q = 0;
-  for (size_t i = 0; i < line.length(); ++i) {
+  const size_t n = line.length();
+  for (size_t i = 0; i < n; ++i) {
     char c = line[i];
+    if (c == '\\' && q != '\'' && i + 1 < n) { cur += c; cur += line[++i]; continue; }
     if (q) { cur += c; if (c == q) q = 0; }
     else if (c == '\'' || c == '"') { q = c; cur += c; }
     else if (c == '|') { segs.push_back(cur); cur = ""; }
@@ -520,25 +536,85 @@ static int tokenize(const String &seg, std::vector<String> &args) {
   String cur;
   bool has = false;
   char q = 0;
-  for (size_t i = 0; i < seg.length(); ++i) {
+  const size_t n = seg.length();
+  for (size_t i = 0; i < n; ++i) {
     char c = seg[i];
+    if (c == '$' && q != '\'') {
+      String val;
+      size_t next = parseDollar(seg, i, val);
+      if (next != i) {
+        if (q) {
+          cur += val; has = true;   // "$X" is one word, even when empty
+        } else {
+          // Unquoted, the value is split on whitespace as sh does, which is
+          // what makes CMD="ls -l"; $CMD run ls with an argument.
+          for (unsigned k = 0; k < val.length(); ++k) {
+            char v = val[k];
+            if (v == ' ' || v == '\t' || v == '\n') {
+              if (has) { args.push_back(cur); cur = ""; has = false; }
+            } else {
+              cur += v; has = true;
+            }
+          }
+        }
+        i = next - 1;
+        continue;
+      }
+    }
     if (q) {
       if (c == q) { q = 0; }
-      else if (c == '\\' && q == '"' && i + 1 < seg.length()) { cur += seg[++i]; }
+      else if (c == '\\' && q == '"' && i + 1 < n) { cur += seg[++i]; }
       else cur += c;
       has = true;
     } else if (c == '\'' || c == '"') {
       q = c; has = true;
-    } else if (c == '\\' && i + 1 < seg.length()) {
+    } else if (c == '\\' && i + 1 < n) {
       cur += seg[++i]; has = true;
     } else if (c == ' ' || c == '\t') {
       if (has) { args.push_back(cur); cur = ""; has = false; }
+    } else if (c == '~' && !has && (i + 1 == n || seg[i + 1] == '/' ||
+                                    seg[i + 1] == ' ' || seg[i + 1] == '\t')) {
+      String home = envGet("HOME");
+      if (home.endsWith("/") && i + 1 < n && seg[i + 1] == '/') home.remove(home.length() - 1);
+      cur += home; has = true;
     } else {
       cur += c; has = true;
     }
   }
   if (has) args.push_back(cur);
   return args.size();
+}
+
+// One pipeline of a command list, and the operator that joined it to the one
+// before: 0 for the first, ';', '&' for &&, '|' for ||.
+struct ListItem {
+  String text;
+  char op;
+};
+
+static void splitList(const String &line, std::vector<ListItem> &items) {
+  items.clear();
+  String cur;
+  char q = 0, joinedBy = 0;
+  const size_t n = line.length();
+  for (size_t i = 0; i < n; ++i) {
+    char c = line[i];
+    if (c == '\\' && q != '\'' && i + 1 < n) { cur += c; cur += line[++i]; continue; }
+    if (q) { cur += c; if (c == q) q = 0; continue; }
+    if (c == '\'' || c == '"') { q = c; cur += c; continue; }
+
+    char op = 0;
+    if (c == ';') op = ';';
+    else if (c == '&' && i + 1 < n && line[i + 1] == '&') op = '&';
+    else if (c == '|' && i + 1 < n && line[i + 1] == '|') op = '|';
+    if (!op) { cur += c; continue; }
+    if (op != ';') i++;            // the second character of && or ||
+
+    items.push_back({cur, joinedBy});
+    cur = "";
+    joinedBy = op;
+  }
+  items.push_back({cur, joinedBy});
 }
 
 // Pull a trailing >/>> redirection out of the arg list. Returns true if found.
@@ -619,14 +695,9 @@ static void expandAliases(std::vector<String> &args) {
 }
 
 // ============================================================================
-//  Dispatch: pipes + redirection
+//  Dispatch: command lists, pipes, redirection
 // ============================================================================
-int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
-  String line = lineIn;
-  line.trim();
-  if (line.length() == 0) return 0;
-  if (line[0] == '#') return 0;
-
+static int runPipeline(const String &line, Print &realOut, Stream *rawIn) {
   std::vector<String> segs = splitPipes(line);
   String stageIn;
   bool haveIn = false;
@@ -694,6 +765,55 @@ int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
       stageIn = sbuf.s;
       haveIn = true;
     }
+  }
+  return rc;
+}
+
+// Runs a whole line: pipelines joined by ; && ||, left to right, with the
+// usual short-circuit - `a && b || c` runs c when either a or b failed.
+// A leading `!` inverts a pipeline's status. Every pipeline that runs updates
+// $?; one that is skipped leaves it alone, which is what carries a failure
+// past `&& b` to a later `|| c`.
+int runLine(const String &lineIn, Print &realOut, Stream *rawIn) {
+  String line = lineIn;
+  line.trim();
+  if (line.length() == 0) return 0;
+  if (line[0] == '#') return 0;
+
+  std::vector<ListItem> items;
+  splitList(line, items);
+
+  // && and || need a command on both sides; a stray ; does not.
+  for (size_t k = 0; k < items.size(); ++k) {
+    String t = items[k].text;
+    t.trim();
+    if (t.length()) continue;
+    const bool leftOfAndOr  = k + 1 < items.size() && items[k + 1].op != ';';
+    const bool rightOfAndOr = items[k].op == '&' || items[k].op == '|';
+    if (leftOfAndOr || rightOfAndOr) {
+      realOut.println(F("syntax error: && and || need a command on each side"));
+      s_lastStatus = 2;
+      return 2;
+    }
+  }
+
+  int rc = s_lastStatus;
+  for (auto &it : items) {
+    if (it.op == '&' && rc != 0) continue;
+    if (it.op == '|' && rc == 0) continue;
+    String t = it.text;
+    t.trim();
+    if (t.length() == 0) continue;
+
+    bool negate = false;
+    if (t == "!" || t.startsWith("! ") || t.startsWith("!\t")) {
+      negate = true;
+      t = t.substring(1);
+      t.trim();
+    }
+    rc = t.length() ? runPipeline(t, realOut, rawIn) : 0;
+    if (negate) rc = (rc == 0) ? 1 : 0;
+    s_lastStatus = rc;
   }
   return rc;
 }

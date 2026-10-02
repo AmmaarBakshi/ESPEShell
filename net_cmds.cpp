@@ -345,7 +345,7 @@ static int cmd_echo(int argc, char **argv, ShellIO &io) {
     else break;
   }
   String out;
-  for (int i = start; i < argc; ++i) { if (i > start) out += ' '; out += expandVars(argv[i]); }
+  for (int i = start; i < argc; ++i) { if (i > start) out += ' '; out += argv[i]; }
   if (esc) out = interpEscapes(out);
   io.out.print(out);
   if (!noNL) io.out.println();
@@ -354,7 +354,7 @@ static int cmd_echo(int argc, char **argv, ShellIO &io) {
 
 static int cmd_printf(int argc, char **argv, ShellIO &io) {
   if (argc < 2) return 0;
-  String fmt = interpEscapes(expandVars(argv[1]));
+  String fmt = interpEscapes(argv[1]);
   int ai = 2;
   for (size_t i = 0; i < fmt.length(); ++i) {
     char c = fmt[i];
@@ -481,7 +481,7 @@ const Command NET_CMDS[] = {
   {"sftp",       cmd_ssh_stub,   "sftp ...",             "(use curl/wget instead)",       G_NET},
   {"env",        cmd_env,        "env",                  "print environment variables",   G_ENV},
   {"export",     cmd_export,     "export NAME=VAL",      "set an environment variable",   G_ENV},
-  {"echo",       cmd_echo,       "echo [-ne] text",      "print text (expands $VARS)",    G_ENV},
+  {"echo",       cmd_echo,       "echo [-ne] text",      "print text",                    G_ENV},
   {"printf",     cmd_printf,     "printf FMT [args]",    "formatted print",               G_ENV},
 };
 const size_t NET_CMDS_N = sizeof(NET_CMDS) / sizeof(NET_CMDS[0]);
