@@ -30,7 +30,7 @@ struct String : std::string {
 
 static int s_lastStatus = 3;
 static std::vector<std::pair<std::string, std::string>> s_env = {
-    {"X", "1 2"}, {"HOME", "/"}, {"EMPTY", ""}, {"NAME", "esp"},
+    {"X", "1 2"}, {"HOME", "/"}, {"EMPTY", ""}, {"NAME", "esp"}, {"W", "x*"},
 };
 static String envGet(const String &key) {
     for (auto &kv : s_env)
@@ -81,6 +81,16 @@ static void list(const char *line, std::vector<std::string> want) {
     report("list", line, got, want);
 }
 
+// Which words are filename patterns: "1" for a pattern, "0" for plain text.
+static void wild(const char *line, std::vector<std::string> want) {
+    std::vector<String> args;
+    std::vector<bool> flags;
+    tokenize(String(line), args, &flags);
+    std::vector<std::string> got;
+    for (bool f : flags) got.push_back(f ? "1" : "0");
+    report("wild", line, got, want);
+}
+
 static void pipes(const char *line, std::vector<std::string> want) {
     std::vector<String> segs = splitPipes(String(line));
     std::vector<std::string> got(segs.begin(), segs.end());
@@ -123,6 +133,12 @@ int main() {
     tok("echo a~b ~x", {"echo", "a~b", "~x"});
     tok("echo \"~\"", {"echo", "~"});
     tok("echo 'a b'  c", {"echo", "a b", "c"});
+
+    printf("glob patterns\n");
+    wild("rm *.txt a?c plain", {"0", "1", "1", "0"});
+    wild("echo 'a*' \"b?\" \\*c", {"0", "0", "0", "0"});
+    wild("ls $W \"$W\"", {"0", "1", "0"});
+    wild("bc 2*3", {"0", "1"});
 
     printf("\n%d/%d checks passed\n", checks - failures, checks);
     return failures ? 1 : 0;

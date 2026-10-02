@@ -2,6 +2,7 @@
 #include "config.h"
 #include <LittleFS.h>
 #include <ctype.h>
+#include <algorithm>
 
 // ============================================================================
 //  Shell state
@@ -531,12 +532,24 @@ static std::vector<String> splitPipes(const String &line) {
   return segs;
 }
 
-static int tokenize(const String &seg, std::vector<String> &args) {
+// `wild`, when given, gets one flag per word: true when the word holds an
+// unquoted * or ?, which makes it a filename pattern for expandGlobs().
+// Quoted or backslashed, those characters are just text.
+static int tokenize(const String &seg, std::vector<String> &args,
+                    std::vector<bool> *wild = nullptr) {
   args.clear();
+  if (wild) wild->clear();
   String cur;
-  bool has = false;
+  bool has = false, isWild = false;
   char q = 0;
   const size_t n = seg.length();
+  auto endWord = [&]() {
+    args.push_back(cur);
+    if (wild) wild->push_back(isWild);
+    cur = "";
+    has = false;
+    isWild = false;
+  };
   for (size_t i = 0; i < n; ++i) {
     char c = seg[i];
     if (c == '$' && q != '\'') {
@@ -551,8 +564,9 @@ static int tokenize(const String &seg, std::vector<String> &args) {
           for (unsigned k = 0; k < val.length(); ++k) {
             char v = val[k];
             if (v == ' ' || v == '\t' || v == '\n') {
-              if (has) { args.push_back(cur); cur = ""; has = false; }
+              if (has) endWord();
             } else {
+              if (v == '*' || v == '?') isWild = true;
               cur += v; has = true;
             }
           }
@@ -571,17 +585,18 @@ static int tokenize(const String &seg, std::vector<String> &args) {
     } else if (c == '\\' && i + 1 < n) {
       cur += seg[++i]; has = true;
     } else if (c == ' ' || c == '\t') {
-      if (has) { args.push_back(cur); cur = ""; has = false; }
+      if (has) endWord();
     } else if (c == '~' && !has && (i + 1 == n || seg[i + 1] == '/' ||
                                     seg[i + 1] == ' ' || seg[i + 1] == '\t')) {
       String home = envGet("HOME");
       if (home.endsWith("/") && i + 1 < n && seg[i + 1] == '/') home.remove(home.length() - 1);
       cur += home; has = true;
     } else {
+      if (c == '*' || c == '?') isWild = true;
       cur += c; has = true;
     }
   }
-  if (has) args.push_back(cur);
+  if (has) endWord();
   return args.size();
 }
 
@@ -676,7 +691,7 @@ String toUnixEol(const String &s) {
 // Replaces a leading alias with its expansion, repeatedly (so one alias may
 // build on another). A word is expanded at most once per line, which is what
 // stops `alias ls='ls -l'` from recursing forever.
-static void expandAliases(std::vector<String> &args) {
+static void expandAliases(std::vector<String> &args, std::vector<bool> &wild) {
   std::vector<String> used;
   for (int depth = 0; depth < 8 && !args.empty(); ++depth) {
     String head = args[0];
@@ -687,11 +702,62 @@ static void expandAliases(std::vector<String> &args) {
     if (val.length() == 0) return;
     used.push_back(head);
     std::vector<String> expanded;
-    tokenize(val, expanded);
+    std::vector<bool> expandedWild;
+    tokenize(val, expanded, &expandedWild);
     if (expanded.empty()) return;
     args.erase(args.begin());
+    wild.erase(wild.begin());
     args.insert(args.begin(), expanded.begin(), expanded.end());
+    wild.insert(wild.begin(), expandedWild.begin(), expandedWild.end());
   }
+}
+
+// ---- filename globbing -------------------------------------------------------
+// Appends the names a pattern matches, sorted, as sh does. Only the last path
+// component may hold wildcards (logs/*.txt, not */a.txt): LittleFS trees are
+// shallow, and it keeps a pattern to one directory listing. Dotfiles match
+// only a pattern that starts with a dot.
+static void globWord(const String &word, std::vector<String> &out) {
+  const int slash = word.lastIndexOf('/');
+  const String dirTyped = (slash >= 0) ? word.substring(0, slash + 1) : String("");
+  const String pat = word.substring(slash + 1);
+  if (pat.length() == 0 || dirTyped.indexOf('*') >= 0 || dirTyped.indexOf('?') >= 0) return;
+
+  const String dirAbs = dirTyped.length() ? resolvePath(dirTyped) : g_cwd;
+  if (!isDir(dirAbs)) return;
+  File d = LittleFS.open(dirAbs);
+  if (!d) return;
+  std::vector<String> hits;
+  for (File e = d.openNextFile(); e; e = d.openNextFile()) {
+    String nm = String(e.name());
+    e.close();
+    const int sl = nm.lastIndexOf('/');
+    if (sl >= 0) nm = nm.substring(sl + 1);
+    if (nm.length() == 0) continue;
+    if (nm[0] == '.' && pat[0] != '.') continue;
+    if (matchWild(nm, pat)) hits.push_back(dirTyped + nm);
+  }
+  d.close();
+  std::sort(hits.begin(), hits.end());
+  out.insert(out.end(), hits.begin(), hits.end());
+}
+
+// Replaces each pattern word with its matches. A pattern that matches nothing
+// is kept as typed - sh's default too - which is what lets `bc 2*3` and
+// `curl http://host/?a=1` through untouched. Redirection targets are never
+// expanded: `> *.txt` names one file.
+static void expandGlobs(std::vector<String> &args, const std::vector<bool> &wild) {
+  if (std::find(wild.begin(), wild.end(), true) == wild.end()) return;
+  std::vector<String> out;
+  out.reserve(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    const bool target = i > 0 && (args[i - 1] == ">" || args[i - 1] == ">>" || args[i - 1] == "<");
+    const bool attached = args[i].startsWith(">") || args[i].startsWith("<");
+    const size_t before = out.size();
+    if (i < wild.size() && wild[i] && !target && !attached) globWord(args[i], out);
+    if (out.size() == before) out.push_back(args[i]);
+  }
+  args.swap(out);
 }
 
 // ============================================================================
@@ -707,8 +773,10 @@ static int runPipeline(const String &line, Print &realOut, Stream *rawIn) {
     bool last = (s + 1 == segs.size());
 
     std::vector<String> args;
-    tokenize(segs[s], args);
-    expandAliases(args);
+    std::vector<bool> wild;
+    tokenize(segs[s], args, &wild);
+    expandAliases(args, wild);
+    expandGlobs(args, wild);
 
     String redir;
     bool append = false;
